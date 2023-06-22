@@ -9,11 +9,15 @@
     "type": "module",
     "scripts": {
         "build": "esbuild --bundle src/index.ts --outdir=dist --format=esm --platform=neutral --minify --sourcemap",
-        "start": "node --loader @swc-node/register/esm src/index.ts"
+        "test:node": "node --loader @swc-node/register/esm src/index.ts",
+        "test:deno": "deno run -A src/index.ts",
+        "check": "deno check src/index.ts",
+        "lint": "deno lint src/index.ts"
     },
     "devDependencies": {
         "@swc-node/register": "1.6.5",
         "esbuild": "0.18.6",
-        "typescript": "5.1.3"
+        "typescript": "5.1.3",
+        "deno": "npm:deno-npx@1.34.3"
     }
 }

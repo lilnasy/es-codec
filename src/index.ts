@@ -30,10 +30,6 @@ const FLOAT64ARRAY      = 0b00101010
 const BIGINT64ARRAY     = 0b00101011
 const BIGUINT64ARRAY    = 0b00101100
 
-const CHUNK    = 0b01000000
-const WRITABLE = 0b01000001
-const READABLE = 0b01000010
-
 type Cursor = { offset : number }
 
 type Memory = unknown[]
@@ -51,7 +47,7 @@ type TypedArray =
     | BigInt64Array
     | BigUint64Array
 
-export function encode(x : unknown, memory : Memory = []) {
+export function encode(x : unknown, memory : Memory = []) : ArrayBuffer {
     
     /* unique types */
     if (x === null)      return Uint8Array.of(NULL).buffer
@@ -67,13 +63,13 @@ export function encode(x : unknown, memory : Memory = []) {
     if (x.constructor === String) return encodeString(x)
     
     /* container types */
-    if (x.constructor === Object) return maybeEncodeReference(x, memory, encodeObject)
+    if (x.constructor === Object) return maybeEncodeReference(x as Record<string, unknown>, memory, encodeObject)
     if (x.constructor === Set)    return maybeEncodeReference(x, memory, encodeSet)
     
     /* low-level types */
     if (x.constructor === ArrayBuffer) return maybeEncodeReference(x, memory, encodeArrayBuffer)
     if (x.constructor === DataView)    return maybeEncodeReference(x, memory, encodeDataView)
-    if (ArrayBuffer.isView(x))         return maybeEncodeReference(x, memory, encodeTypedArray)
+    if (ArrayBuffer.isView(x))         return maybeEncodeReference(x as TypedArray, memory, encodeTypedArray)
 
     throw new Error(`Cannot encode value of type ${x.constructor.name}`)
 }
@@ -105,8 +101,8 @@ export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, memory : Me
 const w = { z: 5 }
 const x = { x: 4, w, y: w }
 const y = new Set([x, w])
-const z = decode(encode(y)!) as any
-console.log(y)
+const z = decode(encode(y)!) as 0
+console.log(encode(y).byteLength)
 console.log(z)
 
 export function concatArrayBuffers(...buffers : ArrayBuffer[]){
@@ -126,10 +122,10 @@ export function concatArrayBuffers(...buffers : ArrayBuffer[]){
 	return result.buffer as ArrayBuffer
 }
 
-function maybeEncodeReference(
-    value : unknown,
+function maybeEncodeReference<T>(
+    value : T,
     memory : Memory,
-    encoder : (x : any, memory : Memory) => ArrayBuffer
+    encoder : (x : T, memory : Memory) => ArrayBuffer
 ) {
     const alreadyEncoded = memory.indexOf(value)
     
@@ -149,7 +145,6 @@ function decodeReference(buffer : ArrayBuffer, cursor : Cursor, memory : Memory)
     const reference = decodeVarint(buffer, cursor)
     return memory[reference]
 }
-
 
 function encodeNumber(number : number) {
     const buffer = new ArrayBuffer(9)
@@ -230,7 +225,7 @@ function decodeString(buffer : ArrayBuffer, cursor : Cursor) {
     return decodedString
 }
 
-function encodeObject(object : object, memory : Memory) : ArrayBuffer {
+function encodeObject(object : Record<string, unknown>, memory : Memory) : ArrayBuffer {
     const keys = Object.keys(object)
     return concatArrayBuffers(
         Uint8Array.of(OBJECT).buffer,
@@ -247,7 +242,7 @@ function encodeObject(object : object, memory : Memory) : ArrayBuffer {
 function decodeObject(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
     const objectLength = decodeVarint(buffer, cursor)
     
-    const result = {}
+    const result : Record<string, unknown> = {}
     memory.push(result)
 
     for (let i = 0; i < objectLength; i++) {
@@ -416,9 +411,4 @@ function decodeVarint(buffer : ArrayBuffer, cursor : Cursor): number {
     }
     
     throw new Error("Invalid varint encoding")
-}
-
-function createTicker() {
-    let counter = 0
-    return () => counter++
 }
