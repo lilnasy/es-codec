@@ -31,7 +31,26 @@ const FLOAT64ARRAY      = 0b00101010
 const BIGINT64ARRAY     = 0b00101011
 const BIGUINT64ARRAY    = 0b00101100
 
-export function encode(x : unknown) {
+type Cursor = { offset : number }
+
+// TODO: investigate performance against an array
+// linear search is probably faster than hash lookup for small messages 
+type Memory = unknown[]
+
+type TypedArray =
+    | Int8Array
+    | Uint8Array
+    | Uint8ClampedArray
+    | Int16Array
+    | Uint16Array
+    | Int32Array
+    | Uint32Array
+    | Float32Array
+    | Float64Array
+    | BigInt64Array
+    | BigUint64Array
+
+export function encode(x : unknown, memory : Memory = []) {
     
     /* unique types */
     if (x === null)      return Uint8Array.of(NULL).buffer
@@ -46,15 +65,16 @@ export function encode(x : unknown) {
     if (x.constructor === BigInt) return encodeBigInt(x)
     if (x.constructor === String) return encodeString(x)
     
+    /* container types */
+    if (x.constructor === Object) return maybeEncodeReference(x, memory, encodeObject)
+    
     /* low-level types */
-    if (x.constructor === ArrayBuffer) return encodeArrayBuffer(x)
-    if (x.constructor === DataView)    return encodeDataView(x)
-    if (ArrayBuffer.isView(x))         return encodeTypedArray(x as Uint8Array)
+    if (x.constructor === ArrayBuffer) return maybeEncodeReference(x, memory, encodeArrayBuffer)
+    if (x.constructor === DataView)    return maybeEncodeReference(x, memory, encodeDataView)
+    if (ArrayBuffer.isView(x))         return maybeEncodeReference(x, memory, encodeTypedArray)
 }
 
-type Cursor = { offset : number }
-
-export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }) {
+export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, memory : Memory = []) {
     const view    = new DataView(buffer, cursor.offset)
     
     const typeTag = view.getUint8(0)
@@ -64,19 +84,21 @@ export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }) {
     if (typeTag === UNDEFINED)   return undefined
     if (typeTag === TRUE)        return true
     if (typeTag === FALSE)       return false
+    if (typeTag === REFERENCE)   return decodeReference(buffer, cursor, memory)
     if (typeTag === NUMBER)      return decodeNumber(buffer, cursor)
     if (typeTag === BIGINTP)     return decodeBigInt(buffer, cursor)
     if (typeTag === BIGINTN)     return -decodeBigInt(buffer, cursor)
     if (typeTag === STRING)      return decodeString(buffer, cursor)
-    if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(buffer, cursor)
-    if (typeTag === DATAVIEW)    return decodeDataView(buffer, cursor)
-    if (typeTag & ARRAYBUFFER)   return decodeTypedArray(buffer, typeTag, cursor)
+    if (typeTag === OBJECT)      return decodeObject(buffer, cursor, memory)
+    if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(buffer, cursor, memory)
+    if (typeTag === DATAVIEW)    return decodeDataView(buffer, cursor, memory)
+    if (typeTag & ARRAYBUFFER)   return decodeTypedArray(buffer, typeTag, cursor, memory)
 }
 
-const arr = new ArrayBuffer(64)
-const x = 11231231231312321312312n
-const y = decode(encode(x)!)
-console.log(y === x)
+const w = { z: 5 }
+const x = { x: 4, w, y: w }
+const y = decode(encode(x)!) as any
+console.log(y.w === y.y)
 console.log(x)
 console.log(y)
 
@@ -94,8 +116,39 @@ export function concatArrayBuffers(...buffers : ArrayBuffer[]){
 		offset += buffer.byteLength
 	}
     
-	return result.buffer
+	return result.buffer as ArrayBuffer
 }
+
+function maybeEncodeReference(
+    value : unknown,
+    memory : Memory,
+    encoder : (x : any, memory : Memory) => ArrayBuffer
+) {
+    const alreadyEncoded = memory.indexOf(value)
+    
+    if (alreadyEncoded === -1) {
+        memory.push(value)
+        return encoder(value, memory)
+    }
+    
+    else return encodeReference(alreadyEncoded)
+}
+
+function encodeReference(reference : number) {
+    const buffer = new ArrayBuffer(9)
+    const view = new DataView(buffer)
+    view.setUint8(0, REFERENCE)
+    view.setUint32(1, reference)
+    return buffer
+}
+
+function decodeReference(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+    const view = new DataView(buffer)
+    const index = view.getUint32(cursor.offset)
+    cursor.offset += 4
+    return memory[index]
+}
+
 
 function encodeNumber(number : number) {
     const buffer = new ArrayBuffer(9)
@@ -160,47 +213,6 @@ function decodeBigInt(buffer : ArrayBuffer, cursor : Cursor) {
     return bigint
 }
 
-function varIntByteCount(num: number): number {
-    
-    let byteCount = 1
-    while (num >= 0b10000000) {
-        num >>>= 7
-        byteCount++
-    }
-    
-    return byteCount
-}
-
-// benchmarks/varint-encode.ts
-export function encodeVarint(num: number): Uint8Array {
-    
-    if (num < 0) throw new Error("Cannot encode negative numbers as varint")
-    
-    const byteCount = varIntByteCount(num)
-    const arr = new Uint8Array(byteCount)
-    
-    for (let i = 0; i < byteCount; i++) {
-        arr[i] = (num & 0b01111111) | (i === (byteCount - 1) ? 0 : 0b10000000)
-        num >>>= 7
-    }
-    
-    return arr
-}
-
-function decodeVarint(bytes: Uint8Array): number {
-    
-    let num = 0
-    let shift = 0
-    for (let i = 0; i < bytes.length; i++) {
-        const b = bytes[i]
-        num |= (b & 0b01111111) << shift
-        if ((b & 0b10000000) === 0) return num
-        shift += 7
-    }
-    
-    throw new Error("Invalid varint encoding")
-}
-
 function encodeString(string : string) {
     const encodedBuffer = new TextEncoder().encode(string).buffer
     return concatArrayBuffers(
@@ -218,6 +230,40 @@ function decodeString(buffer : ArrayBuffer, cursor : Cursor) {
     return new TextDecoder().decode(byteArray.subarray(varIntLength, varIntLength + bufferLength))
 }
 
+function encodeObject(object : object, memory : Memory) : ArrayBuffer {
+    const keys = Object.keys(object)
+    return concatArrayBuffers(
+        Uint8Array.of(OBJECT).buffer,
+        encodeVarint(keys.length).buffer,
+        ...keys.map(key =>
+            concatArrayBuffers(
+                encodeString(key),
+                encode(object[key], memory)!
+            )
+        )
+    )
+}
+
+function decodeObject(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+    const byteArray = new Uint8Array(buffer).subarray(cursor.offset)
+    const objectLength = decodeVarint(byteArray)
+    const varIntLength = varIntByteCount(objectLength)
+    cursor.offset += varIntLength
+    
+    const result = {}
+    memory.push(result)
+
+    for (let i = 0; i < objectLength; i++) {
+        // ignore the tag for the key, go directly to decoding it as a string
+        cursor.offset += 1
+        const key = decodeString(buffer, cursor)
+        result[key] = decode(buffer, cursor, memory)
+    }
+    
+    return result
+}
+
+
 function encodeArrayBuffer(buffer : ArrayBuffer) {
     return concatArrayBuffers(
         Uint8Array.of(ARRAYBUFFER).buffer,
@@ -226,12 +272,18 @@ function encodeArrayBuffer(buffer : ArrayBuffer) {
     )
 }
 
-function decodeArrayBuffer(buffer : ArrayBuffer, cursor : Cursor) {
-    const byteArray = new Uint8Array(buffer).subarray(cursor.offset)
+function decodeArrayBuffer(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+    
+    const byteArray    = new Uint8Array(buffer).subarray(cursor.offset)
     const bufferLength = decodeVarint(byteArray)
     const varIntLength = varIntByteCount(bufferLength)
     cursor.offset += varIntLength + bufferLength
-    return byteArray.slice(varIntLength, varIntLength + bufferLength).buffer
+    
+    const decodedBuffer = byteArray.slice(varIntLength, varIntLength + bufferLength).buffer
+    
+    memory.push(decodedBuffer)
+    
+    return decodedBuffer
 }
 
 function encodeDataView(dataView : DataView) {
@@ -244,7 +296,7 @@ function encodeDataView(dataView : DataView) {
     )
 }
 
-function decodeDataView(buffer : ArrayBuffer, cursor : Cursor) {
+function decodeDataView(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
 
     const byteArray     = new Uint8Array(buffer).subarray(cursor.offset)
     const bufferLength  = decodeVarint(byteArray)
@@ -263,22 +315,12 @@ function decodeDataView(buffer : ArrayBuffer, cursor : Cursor) {
     
     const sourceBuffer  = byteArray3.slice(varIntLength3, bufferLength).buffer
     cursor.offset += bufferLength
-    
-    return new DataView(sourceBuffer, byteOffset, byteLength)
-}
 
-type TypedArray =
-    | Int8Array
-    | Uint8Array
-    | Uint8ClampedArray
-    | Int16Array
-    | Uint16Array
-    | Int32Array
-    | Uint32Array
-    | Float32Array
-    | Float64Array
-    | BigInt64Array
-    | BigUint64Array
+    const decodedView   = new DataView(sourceBuffer, byteOffset, byteLength)
+    memory.push(decodedView)
+    
+    return decodedView
+}
 
 function tagOf(typedArray : TypedArray) {
     const constructor = typedArray.constructor
@@ -324,7 +366,7 @@ function encodeTypedArray(typedArray : TypedArray) {
     )
 }
 
-function decodeTypedArray(buffer : ArrayBuffer, typeTag: number, cursor : Cursor) {
+function decodeTypedArray(buffer : ArrayBuffer, typeTag: number, cursor : Cursor, memory : Memory) {
     const byteArray        = new Uint8Array(buffer, cursor.offset)
     
     const bufferLength     = decodeVarint(byteArray.subarray(cursor.offset))
@@ -343,6 +385,54 @@ function decodeTypedArray(buffer : ArrayBuffer, typeTag: number, cursor : Cursor
     cursor.offset += bufferLength
     
     const TypedArray       = constructorOf(typeTag)
-    return new TypedArray(sourceBuffer, byteOffset, typedArrayLength)
+    const decodedView      = new TypedArray(sourceBuffer, byteOffset, typedArrayLength)
+    memory.push(decodedView)
+    
+    return decodedView
 }
 
+function varIntByteCount(num: number): number {
+    
+    let byteCount = 1
+    while (num >= 0b10000000) {
+        num >>>= 7
+        byteCount++
+    }
+    
+    return byteCount
+}
+
+// benchmarks/varint-encode.ts
+export function encodeVarint(num: number): Uint8Array {
+    
+    if (num < 0) throw new Error("Cannot encode negative numbers as varint")
+    
+    const byteCount = varIntByteCount(num)
+    const arr = new Uint8Array(byteCount)
+    
+    for (let i = 0; i < byteCount; i++) {
+        arr[i] = (num & 0b01111111) | (i === (byteCount - 1) ? 0 : 0b10000000)
+        num >>>= 7
+    }
+    
+    return arr
+}
+
+function decodeVarint(bytes: Uint8Array): number {
+    
+    let num = 0
+    let shift = 0
+    for (let i = 0; i < bytes.length; i++) {
+        const b = bytes[i]
+        num |= (b & 0b01111111) << shift
+        if ((b & 0b10000000) === 0) return num
+        shift += 7
+    }
+    
+    throw new Error("Invalid varint encoding")
+}
+
+function createTicker() {
+    let counter = 0
+    return () => counter++
+}
