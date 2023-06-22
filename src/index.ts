@@ -223,11 +223,10 @@ function encodeString(string : string) {
 }
 
 function decodeString(buffer : ArrayBuffer, cursor : Cursor) {
-    const byteArray = new Uint8Array(buffer).subarray(cursor.offset)
-    const bufferLength = decodeVarint(byteArray)
-    const varIntLength = varIntByteCount(bufferLength)
-    cursor.offset += varIntLength + bufferLength
-    return new TextDecoder().decode(byteArray.subarray(varIntLength, varIntLength + bufferLength))
+    const textBufferLength = decodeVarint(buffer, cursor)
+    const decodedString = new TextDecoder().decode(new Uint8Array(buffer, cursor.offset, textBufferLength))
+    cursor.offset += textBufferLength
+    return decodedString
 }
 
 function encodeObject(object : object, memory : Memory) : ArrayBuffer {
@@ -245,10 +244,7 @@ function encodeObject(object : object, memory : Memory) : ArrayBuffer {
 }
 
 function decodeObject(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
-    const byteArray = new Uint8Array(buffer).subarray(cursor.offset)
-    const objectLength = decodeVarint(byteArray)
-    const varIntLength = varIntByteCount(objectLength)
-    cursor.offset += varIntLength
+    const objectLength = decodeVarint(buffer, cursor)
     
     const result = {}
     memory.push(result)
@@ -273,16 +269,10 @@ function encodeArrayBuffer(buffer : ArrayBuffer) {
 }
 
 function decodeArrayBuffer(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
-    
-    const byteArray    = new Uint8Array(buffer).subarray(cursor.offset)
-    const bufferLength = decodeVarint(byteArray)
-    const varIntLength = varIntByteCount(bufferLength)
-    cursor.offset += varIntLength + bufferLength
-    
-    const decodedBuffer = byteArray.slice(varIntLength, varIntLength + bufferLength).buffer
-    
+    const bufferLength = decodeVarint(buffer, cursor)
+    const decodedBuffer = buffer.slice(cursor.offset, cursor.offset + bufferLength)
+    cursor.offset += bufferLength
     memory.push(decodedBuffer)
-    
     return decodedBuffer
 }
 
@@ -297,28 +287,13 @@ function encodeDataView(dataView : DataView) {
 }
 
 function decodeDataView(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
-
-    const byteArray     = new Uint8Array(buffer).subarray(cursor.offset)
-    const bufferLength  = decodeVarint(byteArray)
-    const varIntLength  = varIntByteCount(bufferLength)
-    cursor.offset += varIntLength
-    
-    const byteArray2    = byteArray.subarray(varIntLength)
-    const byteOffset    = decodeVarint(byteArray2)
-    const varIntLength2 = varIntByteCount(byteOffset)
-    cursor.offset += varIntLength2
-    
-    const byteArray3    = byteArray2.subarray(varIntLength2)
-    const byteLength    = decodeVarint(byteArray3)
-    const varIntLength3 = varIntByteCount(byteLength)
-    cursor.offset += varIntLength3
-    
-    const sourceBuffer  = byteArray3.slice(varIntLength3, bufferLength).buffer
-    cursor.offset += bufferLength
-
+    const bufferLength  = decodeVarint(buffer, cursor)
+    const byteOffset    = decodeVarint(buffer, cursor)
+    const byteLength    = decodeVarint(buffer, cursor)
+    const sourceBuffer  = buffer.slice(cursor.offset, cursor.offset + bufferLength)
+    cursor.offset      += bufferLength
     const decodedView   = new DataView(sourceBuffer, byteOffset, byteLength)
     memory.push(decodedView)
-    
     return decodedView
 }
 
@@ -367,27 +342,14 @@ function encodeTypedArray(typedArray : TypedArray) {
 }
 
 function decodeTypedArray(buffer : ArrayBuffer, typeTag: number, cursor : Cursor, memory : Memory) {
-    const byteArray        = new Uint8Array(buffer, cursor.offset)
-    
-    const bufferLength     = decodeVarint(byteArray.subarray(cursor.offset))
-    const varIntLength     = varIntByteCount(bufferLength)
-    cursor.offset += varIntLength
-    
-    const byteOffset       = decodeVarint(byteArray.subarray(cursor.offset))
-    const varIntLength2    = varIntByteCount(byteOffset)
-    cursor.offset += varIntLength2
-    
-    const typedArrayLength = decodeVarint(byteArray.subarray(cursor.offset))
-    const varIntLength3    = varIntByteCount(typedArrayLength)
-    cursor.offset += varIntLength3
-    
+    const bufferLength     = decodeVarint(buffer, cursor)
+    const byteOffset       = decodeVarint(buffer, cursor)
+    const typedArrayLength = decodeVarint(buffer, cursor)
     const sourceBuffer     = buffer.slice(cursor.offset, cursor.offset + bufferLength)
-    cursor.offset += bufferLength
-    
+    cursor.offset         += bufferLength
     const TypedArray       = constructorOf(typeTag)
     const decodedView      = new TypedArray(sourceBuffer, byteOffset, typedArrayLength)
     memory.push(decodedView)
-    
     return decodedView
 }
 
@@ -418,14 +380,17 @@ export function encodeVarint(num: number): Uint8Array {
     return arr
 }
 
-function decodeVarint(bytes: Uint8Array): number {
+function decodeVarint(buffer : ArrayBuffer, cursor : Cursor): number {
     
+    const byteArray = new Uint8Array(buffer, cursor.offset)
+
     let num = 0
     let shift = 0
-    for (let i = 0; i < bytes.length; i++) {
-        const b = bytes[i]
-        num |= (b & 0b01111111) << shift
-        if ((b & 0b10000000) === 0) return num
+    for (let i = 0; i < byteArray.length; i++) {
+        const varIntPart = byteArray[i]
+        cursor.offset += 1
+        num |= (varIntPart & 0b01111111) << shift
+        if ((varIntPart & 0b10000000) === 0) return num
         shift += 7
     }
     
