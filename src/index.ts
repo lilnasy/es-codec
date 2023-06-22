@@ -1,16 +1,15 @@
 /***** TYPE TAGS *****/
 
-const NULL      = 0b00000000
-const UNDEFINED = 0b00000001
-const TRUE      = 0b00000010
-const FALSE     = 0b00000011
-
-const REFERENCE = 0b00000100
+const NULL      = 0b00000001
+const UNDEFINED = 0b00000010
+const TRUE      = 0b00000011
+const FALSE     = 0b00000100
 const NUMBER    = 0b00000101
+const REFERENCE = 0b00000110
 
-const BIGINTN   = 0b00001000
-const BIGINTP   = 0b00001001
-const STRING    = 0b00001010
+const STRING    = 0b00001000
+const BIGINTN   = 0b00001001
+const BIGINTP   = 0b00001010
 
 const ARRAY     = 0b00010000
 const OBJECT    = 0b00010001
@@ -31,10 +30,12 @@ const FLOAT64ARRAY      = 0b00101010
 const BIGINT64ARRAY     = 0b00101011
 const BIGUINT64ARRAY    = 0b00101100
 
+const CHUNK    = 0b01000000
+const WRITABLE = 0b01000001
+const READABLE = 0b01000010
+
 type Cursor = { offset : number }
 
-// TODO: investigate performance against an array
-// linear search is probably faster than hash lookup for small messages 
 type Memory = unknown[]
 
 type TypedArray =
@@ -67,11 +68,14 @@ export function encode(x : unknown, memory : Memory = []) {
     
     /* container types */
     if (x.constructor === Object) return maybeEncodeReference(x, memory, encodeObject)
+    if (x.constructor === Set)    return maybeEncodeReference(x, memory, encodeSet)
     
     /* low-level types */
     if (x.constructor === ArrayBuffer) return maybeEncodeReference(x, memory, encodeArrayBuffer)
     if (x.constructor === DataView)    return maybeEncodeReference(x, memory, encodeDataView)
     if (ArrayBuffer.isView(x))         return maybeEncodeReference(x, memory, encodeTypedArray)
+
+    throw new Error(`Cannot encode value of type ${x.constructor.name}`)
 }
 
 export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, memory : Memory = []) {
@@ -90,17 +94,20 @@ export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, memory : Me
     if (typeTag === BIGINTN)     return -decodeBigInt(buffer, cursor)
     if (typeTag === STRING)      return decodeString(buffer, cursor)
     if (typeTag === OBJECT)      return decodeObject(buffer, cursor, memory)
+    if (typeTag === SET)         return decodeSet(buffer, cursor, memory)
     if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(buffer, cursor, memory)
     if (typeTag === DATAVIEW)    return decodeDataView(buffer, cursor, memory)
     if (typeTag & ARRAYBUFFER)   return decodeTypedArray(buffer, typeTag, cursor, memory)
+
+    throw new Error(`Cannot decode value tagged as ${typeTag}`)
 }
 
 const w = { z: 5 }
 const x = { x: 4, w, y: w }
-const y = decode(encode(x)!) as any
-console.log(y.w === y.y)
-console.log(x)
+const y = new Set([x, w])
+const z = decode(encode(y)!) as any
 console.log(y)
+console.log(z)
 
 export function concatArrayBuffers(...buffers : ArrayBuffer[]){
     
@@ -135,18 +142,12 @@ function maybeEncodeReference(
 }
 
 function encodeReference(reference : number) {
-    const buffer = new ArrayBuffer(9)
-    const view = new DataView(buffer)
-    view.setUint8(0, REFERENCE)
-    view.setUint32(1, reference)
-    return buffer
+    return concatArrayBuffers(Uint8Array.of(REFERENCE), encodeVarint(reference).buffer)
 }
 
 function decodeReference(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
-    const view = new DataView(buffer)
-    const index = view.getUint32(cursor.offset)
-    cursor.offset += 4
-    return memory[index]
+    const reference = decodeVarint(buffer, cursor)
+    return memory[reference]
 }
 
 
@@ -259,6 +260,26 @@ function decodeObject(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
     return result
 }
 
+function encodeSet(set : Set<unknown>, memory : Memory) {
+    return concatArrayBuffers(
+        Uint8Array.of(SET).buffer,
+        encodeVarint(set.size).buffer,
+        ...[...set].map(value => encode(value, memory)!)
+    )
+}
+
+function decodeSet(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+    const setLength = decodeVarint(buffer, cursor)
+    const result = new Set
+    memory.push(result)
+
+    for (let i = 0; i < setLength; i++) {
+        const element = decode(buffer, cursor, memory)
+        result.add(element)
+    }
+    
+    return result
+}
 
 function encodeArrayBuffer(buffer : ArrayBuffer) {
     return concatArrayBuffers(
