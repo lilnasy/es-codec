@@ -1,20 +1,27 @@
 /***** TYPE TAGS *****/
 
-const NULL      = 0b00000001
-const UNDEFINED = 0b00000010
-const TRUE      = 0b00000011
-const FALSE     = 0b00000100
-const NUMBER    = 0b00000101
-const REFERENCE = 0b00000110
+const NULL        = 0b00000001
+const UNDEFINED   = 0b00000010
+const TRUE        = 0b00000011
+const FALSE       = 0b00000100
+const REFERENCE   = 0b00000101
+const NUMBER      = 0b00000110
+const DATE        = 0b00000111
+const STRING      = 0b00001000
+const BIGINTN     = 0b00001001
+const BIGINTP     = 0b00001010
+const ARRAY       = 0b00001011
+const OBJECT      = 0b00001100
+const SET         = 0b00001101
+const MAP         = 0b00001110
 
-const STRING    = 0b00001000
-const BIGINTN   = 0b00001001
-const BIGINTP   = 0b00001010
-
-const ARRAY     = 0b00010000
-const OBJECT    = 0b00010001
-const SET       = 0b00010010
-const MAP       = 0b00010011
+const ERROR          = 0b00010000
+const EVALERROR      = 0b00010001
+const RANGEERROR     = 0b00010010
+const REFERENCEERROR = 0b00010011
+const SYNTAXERROR    = 0b00010100
+const TYPEERROR      = 0b00010101
+const URIERROR       = 0b00010110
 
 const ARRAYBUFFER       = 0b00100000
 const DATAVIEW          = 0b00100001
@@ -47,6 +54,14 @@ type TypedArray =
     | BigInt64Array
     | BigUint64Array
 
+class NotSerializable extends Error {
+    constructor(readonly value) {
+        super()
+    }
+}
+
+class Unreachable extends Error {}
+
 export function encode(x : unknown, memory : Memory = []) : ArrayBuffer {
     
     /* unique types */
@@ -57,6 +72,7 @@ export function encode(x : unknown, memory : Memory = []) : ArrayBuffer {
     
     /* simple types */
     if (x.constructor === Number) return encodeNumber(x)
+    if (x.constructor === Date)   return encodeDate(x)
     
     /* lengthy types */
     if (x.constructor === BigInt) return encodeBigInt(x)
@@ -66,12 +82,14 @@ export function encode(x : unknown, memory : Memory = []) : ArrayBuffer {
     if (x.constructor === Object) return maybeEncodeReference(x as Record<string, unknown>, memory, encodeObject)
     if (x.constructor === Set)    return maybeEncodeReference(x, memory, encodeSet)
     
+    /* error types */
+    if (x instanceof Error) return maybeEncodeReference(x, memory, encodeError)
+    
     /* low-level types */
     if (x.constructor === ArrayBuffer) return maybeEncodeReference(x, memory, encodeArrayBuffer)
-    if (x.constructor === DataView)    return maybeEncodeReference(x, memory, encodeDataView)
     if (ArrayBuffer.isView(x))         return maybeEncodeReference(x as TypedArray, memory, encodeTypedArray)
-
-    throw new Error(`Cannot encode value of type ${x.constructor.name}`)
+    
+    throw new NotSerializable(x)
 }
 
 export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, memory : Memory = []) {
@@ -86,24 +104,18 @@ export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, memory : Me
     if (typeTag === FALSE)       return false
     if (typeTag === REFERENCE)   return decodeReference(buffer, cursor, memory)
     if (typeTag === NUMBER)      return decodeNumber(buffer, cursor)
+    if (typeTag === DATE)        return decodeDate(buffer, cursor)
     if (typeTag === BIGINTP)     return decodeBigInt(buffer, cursor)
     if (typeTag === BIGINTN)     return -decodeBigInt(buffer, cursor)
     if (typeTag === STRING)      return decodeString(buffer, cursor)
     if (typeTag === OBJECT)      return decodeObject(buffer, cursor, memory)
     if (typeTag === SET)         return decodeSet(buffer, cursor, memory)
+    if (typeTag & ERROR)         return decodeError(buffer, typeTag, cursor, memory)
     if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(buffer, cursor, memory)
-    if (typeTag === DATAVIEW)    return decodeDataView(buffer, cursor, memory)
     if (typeTag & ARRAYBUFFER)   return decodeTypedArray(buffer, typeTag, cursor, memory)
 
-    throw new Error(`Cannot decode value tagged as ${typeTag}`)
+    throw new Unreachable
 }
-
-const w = { z: 5 }
-const x = { x: 4, w, y: w }
-const y = new Set([x, w])
-const z = decode(encode(y)!) as 0
-console.log(encode(y).byteLength)
-console.log(z)
 
 export function concatArrayBuffers(...buffers : ArrayBuffer[]){
     
@@ -160,6 +172,20 @@ function decodeNumber(buffer : ArrayBuffer, cursor : Cursor) {
     return view.getFloat64(0)
 }
 
+function encodeDate(date : Date) {
+    const buffer = new ArrayBuffer(9)
+    const view = new DataView(buffer)
+    view.setUint8(0, DATE)
+    view.setFloat64(1, date.getTime())
+    return buffer
+}
+
+function decodeDate(buffer : ArrayBuffer, cursor : Cursor) {
+    const view = new DataView(buffer, cursor.offset)
+    cursor.offset += 8
+    return new Date(view.getFloat64(0))
+}
+
 // benchmarks/bigint-encode.ts
 export function encodeBigInt(bigint : bigint) {
     
@@ -172,7 +198,7 @@ export function encodeBigInt(bigint : bigint) {
         b >>= 64n
     }
     
-    if (uint64Count > 255) throw new Error('BigInt too large to serialize')
+    if (uint64Count > 255) throw new NotSerializable(bigint)
     
     const buffer = new ArrayBuffer(2 + 8 * uint64Count)
     const view = new DataView(buffer)
@@ -251,7 +277,7 @@ function decodeObject(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
         const key = decodeString(buffer, cursor)
         result[key] = decode(buffer, cursor, memory)
     }
-    
+
     return result
 }
 
@@ -276,6 +302,87 @@ function decodeSet(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
     return result
 }
 
+function encodeMap(map : Map<unknown, unknown>, memory : Memory) {
+    return concatArrayBuffers(
+        Uint8Array.of(MAP).buffer,
+        encodeVarint(map.size).buffer,
+        ...[...map].map(([key, value]) =>
+            concatArrayBuffers(
+                encode(key, memory)!,
+                encode(value, memory)!
+            )
+        )
+    )
+}
+
+function decodeMap(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+    const mapLength = decodeVarint(buffer, cursor)
+    const result = new Map
+    memory.push(result)
+
+    for (let i = 0; i < mapLength; i++) {
+        const key = decode(buffer, cursor, memory)
+        const value = decode(buffer, cursor, memory)
+        result.set(key, value)
+    }
+
+    return result
+}
+
+function tagOfError(error : Error) {
+    if (error.constructor === Error)          return ERROR
+    if (error.constructor === EvalError)      return EVALERROR
+    if (error.constructor === RangeError)     return RANGEERROR
+    if (error.constructor === ReferenceError) return REFERENCEERROR
+    if (error.constructor === SyntaxError)    return SYNTAXERROR
+    if (error.constructor === TypeError)      return TYPEERROR
+    if (error.constructor === URIError)       return URIERROR
+
+    throw new NotSerializable(error)
+}
+
+function constructorOfError(tag : number) {
+    if (tag === ERROR)          return Error
+    if (tag === EVALERROR)      return EvalError
+    if (tag === RANGEERROR)     return RangeError
+    if (tag === REFERENCEERROR) return ReferenceError
+    if (tag === SYNTAXERROR)    return SyntaxError
+    if (tag === TYPEERROR)      return TypeError
+    if (tag === URIERROR)       return URIError
+
+    throw new Unreachable
+}
+
+function encodeError(error : Error, memory : Memory) {
+    return concatArrayBuffers(
+        Uint8Array.of(tagOfError(error)).buffer,
+        encodeString(error.message),
+        encodeString(error.stack ?? ''),
+        encode((error as unknown as { cause: unknown } ).cause, memory)!
+    )
+}
+
+function decodeError(buffer : ArrayBuffer, typeTag : number, cursor : Cursor, memory : Memory) {
+    // ignore the tag for the message, go directly to decoding it as a string
+    cursor.offset += 1
+    const message = decodeString(buffer, cursor)
+    
+    // ignore the tag for the stack, go directly to decoding it as a string
+    cursor.offset += 1
+    const stack = decodeString(buffer, cursor)
+    const cause = decode(buffer, cursor, memory)
+    
+    const error =
+        cause === undefined
+            ? new (constructorOfError(typeTag))(message)
+            // @ts-ignore
+            : new (constructorOfError(typeTag))(message, { cause })
+    
+    error.stack = stack
+    
+    return error
+}
+
 function encodeArrayBuffer(buffer : ArrayBuffer) {
     return concatArrayBuffers(
         Uint8Array.of(ARRAYBUFFER).buffer,
@@ -292,30 +399,10 @@ function decodeArrayBuffer(buffer : ArrayBuffer, cursor : Cursor, memory : Memor
     return decodedBuffer
 }
 
-function encodeDataView(dataView : DataView) {
-    return concatArrayBuffers(
-        Uint8Array.of(DATAVIEW).buffer,
-        encodeVarint(dataView.buffer.byteLength).buffer,
-        encodeVarint(dataView.byteOffset).buffer,
-        encodeVarint(dataView.byteLength).buffer,
-        dataView.buffer
-    )
-}
-
-function decodeDataView(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
-    const bufferLength  = decodeVarint(buffer, cursor)
-    const byteOffset    = decodeVarint(buffer, cursor)
-    const byteLength    = decodeVarint(buffer, cursor)
-    const sourceBuffer  = buffer.slice(cursor.offset, cursor.offset + bufferLength)
-    cursor.offset      += bufferLength
-    const decodedView   = new DataView(sourceBuffer, byteOffset, byteLength)
-    memory.push(decodedView)
-    return decodedView
-}
-
-function tagOf(typedArray : TypedArray) {
+function tagOfTypedArray(typedArray : TypedArray) {
     const constructor = typedArray.constructor
     
+    if (constructor === DataView)          return DATAVIEW
     if (constructor === Int8Array)         return INT8ARRAY
     if (constructor === Uint8Array)        return UINT8ARRAY
     if (constructor === Uint8ClampedArray) return UINT8CLAMPEDARRAY
@@ -328,10 +415,11 @@ function tagOf(typedArray : TypedArray) {
     if (constructor === BigInt64Array)     return BIGINT64ARRAY
     if (constructor === BigUint64Array)    return BIGUINT64ARRAY
     
-    throw new Error("Invalid typed array: " + constructor?.name ?? typedArray?.[Symbol.toStringTag] ?? constructor ?? typedArray)
+    throw new NotSerializable(typedArray)
 }
 
-function constructorOf(typeTag : number) {
+function constructorOfTypedArray(typeTag : number) {
+    if (typeTag === DATAVIEW)          return DataView
     if (typeTag === INT8ARRAY)         return Int8Array
     if (typeTag === UINT8ARRAY)        return Uint8Array
     if (typeTag === UINT8CLAMPEDARRAY) return Uint8ClampedArray
@@ -344,27 +432,27 @@ function constructorOf(typeTag : number) {
     if (typeTag === BIGINT64ARRAY)     return BigInt64Array
     if (typeTag === BIGUINT64ARRAY)    return BigUint64Array
     
-    throw new Error("Invalid type tag: " + typeTag)
+    throw new Unreachable
 }
 
 function encodeTypedArray(typedArray : TypedArray) {
     return concatArrayBuffers(
-        Uint8Array.of(tagOf(typedArray)).buffer,
+        Uint8Array.of(tagOfTypedArray(typedArray)).buffer,
         encodeVarint(typedArray.buffer.byteLength).buffer,
         encodeVarint(typedArray.byteOffset).buffer,
-        encodeVarint(typedArray.length).buffer,
+        encodeVarint(typedArray instanceof DataView ? typedArray.byteLength : typedArray.length).buffer,
         typedArray.buffer
     )
 }
 
 function decodeTypedArray(buffer : ArrayBuffer, typeTag: number, cursor : Cursor, memory : Memory) {
-    const bufferLength     = decodeVarint(buffer, cursor)
-    const byteOffset       = decodeVarint(buffer, cursor)
-    const typedArrayLength = decodeVarint(buffer, cursor)
-    const sourceBuffer     = buffer.slice(cursor.offset, cursor.offset + bufferLength)
-    cursor.offset         += bufferLength
-    const TypedArray       = constructorOf(typeTag)
-    const decodedView      = new TypedArray(sourceBuffer, byteOffset, typedArrayLength)
+    const bufferLength = decodeVarint(buffer, cursor)
+    const byteOffset   = decodeVarint(buffer, cursor)
+    const viewLength   = decodeVarint(buffer, cursor)
+    const sourceBuffer = buffer.slice(cursor.offset, cursor.offset + bufferLength)
+    cursor.offset     += bufferLength
+    const TypedArray   = constructorOfTypedArray(typeTag)
+    const decodedView  = new TypedArray(sourceBuffer, byteOffset, viewLength)
     memory.push(decodedView)
     return decodedView
 }
@@ -382,8 +470,6 @@ function varIntByteCount(num: number): number {
 
 // benchmarks/varint-encode.ts
 export function encodeVarint(num: number): Uint8Array {
-    
-    if (num < 0) throw new Error("Cannot encode negative numbers as varint")
     
     const byteCount = varIntByteCount(num)
     const arr = new Uint8Array(byteCount)
@@ -410,5 +496,5 @@ function decodeVarint(buffer : ArrayBuffer, cursor : Cursor): number {
         shift += 7
     }
     
-    throw new Error("Invalid varint encoding")
+    throw new Unreachable
 }
