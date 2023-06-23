@@ -1,27 +1,27 @@
 /***** TYPE TAGS *****/
 
-const NULL        = 0b00000001
-const UNDEFINED   = 0b00000010
-const TRUE        = 0b00000011
-const FALSE       = 0b00000100
-const REFERENCE   = 0b00000101
-const NUMBER      = 0b00000110
-const DATE        = 0b00000111
-const STRING      = 0b00001000
-const BIGINTN     = 0b00001001
-const BIGINTP     = 0b00001010
-const ARRAY       = 0b00001011
-const OBJECT      = 0b00001100
-const SET         = 0b00001101
-const MAP         = 0b00001110
+const NULL      = 0b00000001
+const UNDEFINED = 0b00000010
+const TRUE      = 0b00000011
+const FALSE     = 0b00000100
+const REFERENCE = 0b00000101
+const NUMBER    = 0b00000110
+const DATE      = 0b00000111
+const STRING    = 0b00001000
+const BIGINTN   = 0b00001001
+const BIGINTP   = 0b00001010
+const ARRAY     = 0b00001011
+const OBJECT    = 0b00001100
+const SET       = 0b00001101
+const MAP       = 0b00001110
 
-const ERROR          = 0b00010000
-const EVALERROR      = 0b00010001
-const RANGEERROR     = 0b00010010
-const REFERENCEERROR = 0b00010011
-const SYNTAXERROR    = 0b00010100
-const TYPEERROR      = 0b00010101
-const URIERROR       = 0b00010110
+const ERROR           = 0b0010000
+const EVAL_ERROR      = 0b0010001
+const RANGE_ERROR     = 0b0010010
+const REFERENCE_ERROR = 0b0010011
+const SYNTAX_ERROR    = 0b0010100
+const TYPE_ERROR      = 0b0010101
+const URI_ERROR       = 0b0010110
 
 const ARRAYBUFFER       = 0b00100000
 const DATAVIEW          = 0b00100001
@@ -55,7 +55,7 @@ type TypedArray =
     | BigUint64Array
 
 class NotSerializable extends Error {
-    constructor(readonly value) {
+    constructor(readonly value : unknown) {
         super()
     }
 }
@@ -79,8 +79,10 @@ export function encode(x : unknown, memory : Memory = []) : ArrayBuffer {
     if (x.constructor === String) return encodeString(x)
     
     /* container types */
+    if (x.constructor === Array)  return maybeEncodeReference(x, memory, encodeArray)
     if (x.constructor === Object) return maybeEncodeReference(x as Record<string, unknown>, memory, encodeObject)
     if (x.constructor === Set)    return maybeEncodeReference(x, memory, encodeSet)
+    if (x.constructor === Map)    return maybeEncodeReference(x, memory, encodeMap)
     
     /* error types */
     if (x instanceof Error) return maybeEncodeReference(x, memory, encodeError)
@@ -108,6 +110,7 @@ export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, memory : Me
     if (typeTag === BIGINTP)     return decodeBigInt(buffer, cursor)
     if (typeTag === BIGINTN)     return -decodeBigInt(buffer, cursor)
     if (typeTag === STRING)      return decodeString(buffer, cursor)
+    if (typeTag === ARRAY)       return decodeArray(buffer, cursor, memory)
     if (typeTag === OBJECT)      return decodeObject(buffer, cursor, memory)
     if (typeTag === SET)         return decodeSet(buffer, cursor, memory)
     if (typeTag & ERROR)         return decodeError(buffer, typeTag, cursor, memory)
@@ -251,6 +254,26 @@ function decodeString(buffer : ArrayBuffer, cursor : Cursor) {
     return decodedString
 }
 
+function encodeArray(array : unknown[], memory : Memory) {
+    if (array.length !== Object.keys(array).length) throw new NotSerializable(array)
+    return concatArrayBuffers(
+        Uint8Array.of(ARRAY).buffer,
+        encodeVarint(array.length).buffer,
+        ...array.map(x => encode(x, memory)!)
+    )
+}
+
+function decodeArray(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+    const arrayLength = decodeVarint(buffer, cursor)
+    const result : unknown[] = []
+    memory.push(result)
+    
+    for (let i = 0; i < arrayLength; i++)
+        result.push(decode(buffer, cursor, memory))
+    
+    return result
+}
+
 function encodeObject(object : Record<string, unknown>, memory : Memory) : ArrayBuffer {
     const keys = Object.keys(object)
     return concatArrayBuffers(
@@ -267,7 +290,6 @@ function encodeObject(object : Record<string, unknown>, memory : Memory) : Array
 
 function decodeObject(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
     const objectLength = decodeVarint(buffer, cursor)
-    
     const result : Record<string, unknown> = {}
     memory.push(result)
 
@@ -330,25 +352,27 @@ function decodeMap(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
 }
 
 function tagOfError(error : Error) {
-    if (error.constructor === Error)          return ERROR
-    if (error.constructor === EvalError)      return EVALERROR
-    if (error.constructor === RangeError)     return RANGEERROR
-    if (error.constructor === ReferenceError) return REFERENCEERROR
-    if (error.constructor === SyntaxError)    return SYNTAXERROR
-    if (error.constructor === TypeError)      return TYPEERROR
-    if (error.constructor === URIError)       return URIERROR
+    const constructor = error.constructor
 
+    if (constructor === Error)          return ERROR
+    if (constructor === EvalError)      return EVAL_ERROR
+    if (constructor === RangeError)     return RANGE_ERROR
+    if (constructor === ReferenceError) return REFERENCE_ERROR
+    if (constructor === SyntaxError)    return SYNTAX_ERROR
+    if (constructor === TypeError)      return TYPE_ERROR
+    if (constructor === URIError)       return URI_ERROR
+    
     throw new NotSerializable(error)
 }
 
 function constructorOfError(tag : number) {
-    if (tag === ERROR)          return Error
-    if (tag === EVALERROR)      return EvalError
-    if (tag === RANGEERROR)     return RangeError
-    if (tag === REFERENCEERROR) return ReferenceError
-    if (tag === SYNTAXERROR)    return SyntaxError
-    if (tag === TYPEERROR)      return TypeError
-    if (tag === URIERROR)       return URIError
+    if (tag === ERROR)           return Error
+    if (tag === EVAL_ERROR)      return EvalError
+    if (tag === RANGE_ERROR)     return RangeError
+    if (tag === REFERENCE_ERROR) return ReferenceError
+    if (tag === SYNTAX_ERROR)    return SyntaxError
+    if (tag === TYPE_ERROR)      return TypeError
+    if (tag === URI_ERROR)       return URIError
 
     throw new Unreachable
 }
