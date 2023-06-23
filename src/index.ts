@@ -94,7 +94,7 @@ export function encode(x : unknown, referrables : Memory = []) : ArrayBuffer {
     throw new NotSerializable(x)
 }
 
-export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, referrables : Memory = []) {
+export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, referrables : Memory = []) : unknown {
     const view    = new DataView(buffer, cursor.offset)
     
     const typeTag = view.getUint8(0)
@@ -396,7 +396,7 @@ function decodeError(buffer : ArrayBuffer, typeTag : number, cursor : Cursor, re
     const stack = decodeString(buffer, cursor)
     const cause = decode(buffer, cursor, referrables)
     
-    const error =
+    const error : Error =
         cause === undefined
             ? new (constructorOfError(typeTag))(message)
             // @ts-ignore

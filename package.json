@@ -9,8 +9,9 @@
     "type": "module",
     "scripts": {
         "build": "esbuild --bundle src/index.ts --outdir=dist --format=esm --platform=neutral --minify --sourcemap",
-        "test:node": "node --loader @swc-node/register/esm tests/strings.ts",
-        "test:deno": "deno run -A tests/strings.ts",
+        "start": "node --loader @swc-node/register/esm src/index.ts",
+        "test:node": "node tests/on-node.js",
+        "test:deno": "deno test tests/on-deno.js",
         "check": "deno check src/index.ts",
         "lint": "deno lint src/index.ts"
     },
