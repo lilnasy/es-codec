@@ -62,7 +62,7 @@ class NotSerializable extends Error {
 
 class Unreachable extends Error {}
 
-export function encode(x : unknown, memory : Memory = []) : ArrayBuffer {
+export function encode(x : unknown, referrables : Memory = []) : ArrayBuffer {
     
     /* unique types */
     if (x === null)      return Uint8Array.of(NULL).buffer
@@ -79,22 +79,22 @@ export function encode(x : unknown, memory : Memory = []) : ArrayBuffer {
     if (x.constructor === String) return encodeString(x)
     
     /* container types */
-    if (x.constructor === Array)  return maybeEncodeReference(x, memory, encodeArray)
-    if (x.constructor === Object) return maybeEncodeReference(x as Record<string, unknown>, memory, encodeObject)
-    if (x.constructor === Set)    return maybeEncodeReference(x, memory, encodeSet)
-    if (x.constructor === Map)    return maybeEncodeReference(x, memory, encodeMap)
+    if (x.constructor === Array)  return maybeEncodeReference(x, referrables, encodeArray)
+    if (x.constructor === Object) return maybeEncodeReference(x as Record<string, unknown>, referrables, encodeObject)
+    if (x.constructor === Set)    return maybeEncodeReference(x, referrables, encodeSet)
+    if (x.constructor === Map)    return maybeEncodeReference(x, referrables, encodeMap)
     
     /* error types */
-    if (x instanceof Error) return maybeEncodeReference(x, memory, encodeError)
+    if (x instanceof Error) return maybeEncodeReference(x, referrables, encodeError)
     
     /* low-level types */
-    if (x.constructor === ArrayBuffer) return maybeEncodeReference(x, memory, encodeArrayBuffer)
-    if (ArrayBuffer.isView(x))         return maybeEncodeReference(x as TypedArray, memory, encodeTypedArray)
+    if (x.constructor === ArrayBuffer) return maybeEncodeReference(x, referrables, encodeArrayBuffer)
+    if (ArrayBuffer.isView(x))         return maybeEncodeReference(x as TypedArray, referrables, encodeTypedArray)
     
     throw new NotSerializable(x)
 }
 
-export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, memory : Memory = []) {
+export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, referrables : Memory = []) {
     const view    = new DataView(buffer, cursor.offset)
     
     const typeTag = view.getUint8(0)
@@ -104,18 +104,18 @@ export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, memory : Me
     if (typeTag === UNDEFINED)   return undefined
     if (typeTag === TRUE)        return true
     if (typeTag === FALSE)       return false
-    if (typeTag === REFERENCE)   return decodeReference(buffer, cursor, memory)
+    if (typeTag === REFERENCE)   return decodeReference(buffer, cursor, referrables)
     if (typeTag === NUMBER)      return decodeNumber(buffer, cursor)
     if (typeTag === DATE)        return decodeDate(buffer, cursor)
     if (typeTag === BIGINTP)     return decodeBigInt(buffer, cursor)
     if (typeTag === BIGINTN)     return -decodeBigInt(buffer, cursor)
     if (typeTag === STRING)      return decodeString(buffer, cursor)
-    if (typeTag === ARRAY)       return decodeArray(buffer, cursor, memory)
-    if (typeTag === OBJECT)      return decodeObject(buffer, cursor, memory)
-    if (typeTag === SET)         return decodeSet(buffer, cursor, memory)
-    if (typeTag & ERROR)         return decodeError(buffer, typeTag, cursor, memory)
-    if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(buffer, cursor, memory)
-    if (typeTag & ARRAYBUFFER)   return decodeTypedArray(buffer, typeTag, cursor, memory)
+    if (typeTag === ARRAY)       return decodeArray(buffer, cursor, referrables)
+    if (typeTag === OBJECT)      return decodeObject(buffer, cursor, referrables)
+    if (typeTag === SET)         return decodeSet(buffer, cursor, referrables)
+    if (typeTag & ERROR)         return decodeError(buffer, typeTag, cursor, referrables)
+    if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(buffer, cursor, referrables)
+    if (typeTag & ARRAYBUFFER)   return decodeTypedArray(buffer, typeTag, cursor, referrables)
 
     throw new Unreachable
 }
@@ -139,14 +139,14 @@ export function concatArrayBuffers(...buffers : ArrayBuffer[]){
 
 function maybeEncodeReference<T>(
     value : T,
-    memory : Memory,
-    encoder : (x : T, memory : Memory) => ArrayBuffer
+    referrables : Memory,
+    encoder : (x : T, referrables : Memory) => ArrayBuffer
 ) {
-    const alreadyEncoded = memory.indexOf(value)
+    const alreadyEncoded = referrables.indexOf(value)
     
     if (alreadyEncoded === -1) {
-        memory.push(value)
-        return encoder(value, memory)
+        referrables.push(value)
+        return encoder(value, referrables)
     }
     
     else return encodeReference(alreadyEncoded)
@@ -156,9 +156,9 @@ function encodeReference(reference : number) {
     return concatArrayBuffers(Uint8Array.of(REFERENCE), encodeVarint(reference).buffer)
 }
 
-function decodeReference(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+function decodeReference(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) {
     const reference = decodeVarint(buffer, cursor)
-    return memory[reference]
+    return referrables[reference]
 }
 
 function encodeNumber(number : number) {
@@ -254,27 +254,27 @@ function decodeString(buffer : ArrayBuffer, cursor : Cursor) {
     return decodedString
 }
 
-function encodeArray(array : unknown[], memory : Memory) {
+function encodeArray(array : unknown[], referrables : Memory) {
     if (array.length !== Object.keys(array).length) throw new NotSerializable(array)
     return concatArrayBuffers(
         Uint8Array.of(ARRAY).buffer,
         encodeVarint(array.length).buffer,
-        ...array.map(x => encode(x, memory)!)
+        ...array.map(x => encode(x, referrables)!)
     )
 }
 
-function decodeArray(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+function decodeArray(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) {
     const arrayLength = decodeVarint(buffer, cursor)
     const result : unknown[] = []
-    memory.push(result)
+    referrables.push(result)
     
     for (let i = 0; i < arrayLength; i++)
-        result.push(decode(buffer, cursor, memory))
+        result.push(decode(buffer, cursor, referrables))
     
     return result
 }
 
-function encodeObject(object : Record<string, unknown>, memory : Memory) : ArrayBuffer {
+function encodeObject(object : Record<string, unknown>, referrables : Memory) : ArrayBuffer {
     const keys = Object.keys(object)
     return concatArrayBuffers(
         Uint8Array.of(OBJECT).buffer,
@@ -282,69 +282,69 @@ function encodeObject(object : Record<string, unknown>, memory : Memory) : Array
         ...keys.map(key =>
             concatArrayBuffers(
                 encodeString(key),
-                encode(object[key], memory)!
+                encode(object[key], referrables)!
             )
         )
     )
 }
 
-function decodeObject(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+function decodeObject(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) {
     const objectLength = decodeVarint(buffer, cursor)
     const result : Record<string, unknown> = {}
-    memory.push(result)
+    referrables.push(result)
 
     for (let i = 0; i < objectLength; i++) {
         // ignore the tag for the key, go directly to decoding it as a string
         cursor.offset += 1
         const key = decodeString(buffer, cursor)
-        result[key] = decode(buffer, cursor, memory)
+        result[key] = decode(buffer, cursor, referrables)
     }
 
     return result
 }
 
-function encodeSet(set : Set<unknown>, memory : Memory) {
+function encodeSet(set : Set<unknown>, referrables : Memory) {
     return concatArrayBuffers(
         Uint8Array.of(SET).buffer,
         encodeVarint(set.size).buffer,
-        ...[...set].map(value => encode(value, memory)!)
+        ...[...set].map(value => encode(value, referrables)!)
     )
 }
 
-function decodeSet(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+function decodeSet(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) {
     const setLength = decodeVarint(buffer, cursor)
     const result = new Set
-    memory.push(result)
+    referrables.push(result)
 
     for (let i = 0; i < setLength; i++) {
-        const element = decode(buffer, cursor, memory)
+        const element = decode(buffer, cursor, referrables)
         result.add(element)
     }
     
     return result
 }
 
-function encodeMap(map : Map<unknown, unknown>, memory : Memory) {
+function encodeMap(map : Map<unknown, unknown>, referrables : Memory) {
     return concatArrayBuffers(
         Uint8Array.of(MAP).buffer,
         encodeVarint(map.size).buffer,
         ...[...map].map(([key, value]) =>
             concatArrayBuffers(
-                encode(key, memory)!,
-                encode(value, memory)!
+                encode(key, referrables)!,
+                encode(value, referrables)!
             )
         )
     )
 }
 
-function decodeMap(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+function decodeMap(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) {
     const mapLength = decodeVarint(buffer, cursor)
     const result = new Map
-    memory.push(result)
+    referrables.push(result)
 
     for (let i = 0; i < mapLength; i++) {
-        const key = decode(buffer, cursor, memory)
-        const value = decode(buffer, cursor, memory)
+        const key = decode(buffer, cursor, referrables)
+        const value = decode(buffer, cursor, referrables)
         result.set(key, value)
     }
 
@@ -377,16 +377,16 @@ function constructorOfError(tag : number) {
     throw new Unreachable
 }
 
-function encodeError(error : Error, memory : Memory) {
+function encodeError(error : Error, referrables : Memory) {
     return concatArrayBuffers(
         Uint8Array.of(tagOfError(error)).buffer,
         encodeString(error.message),
         encodeString(error.stack ?? ''),
-        encode((error as unknown as { cause: unknown } ).cause, memory)!
+        encode((error as unknown as { cause: unknown } ).cause, referrables)!
     )
 }
 
-function decodeError(buffer : ArrayBuffer, typeTag : number, cursor : Cursor, memory : Memory) {
+function decodeError(buffer : ArrayBuffer, typeTag : number, cursor : Cursor, referrables : Memory) {
     // ignore the tag for the message, go directly to decoding it as a string
     cursor.offset += 1
     const message = decodeString(buffer, cursor)
@@ -394,7 +394,7 @@ function decodeError(buffer : ArrayBuffer, typeTag : number, cursor : Cursor, me
     // ignore the tag for the stack, go directly to decoding it as a string
     cursor.offset += 1
     const stack = decodeString(buffer, cursor)
-    const cause = decode(buffer, cursor, memory)
+    const cause = decode(buffer, cursor, referrables)
     
     const error =
         cause === undefined
@@ -415,11 +415,11 @@ function encodeArrayBuffer(buffer : ArrayBuffer) {
     )
 }
 
-function decodeArrayBuffer(buffer : ArrayBuffer, cursor : Cursor, memory : Memory) {
+function decodeArrayBuffer(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) {
     const bufferLength = decodeVarint(buffer, cursor)
     const decodedBuffer = buffer.slice(cursor.offset, cursor.offset + bufferLength)
     cursor.offset += bufferLength
-    memory.push(decodedBuffer)
+    referrables.push(decodedBuffer)
     return decodedBuffer
 }
 
@@ -469,7 +469,7 @@ function encodeTypedArray(typedArray : TypedArray) {
     )
 }
 
-function decodeTypedArray(buffer : ArrayBuffer, typeTag: number, cursor : Cursor, memory : Memory) {
+function decodeTypedArray(buffer : ArrayBuffer, typeTag: number, cursor : Cursor, referrables : Memory) {
     const bufferLength = decodeVarint(buffer, cursor)
     const byteOffset   = decodeVarint(buffer, cursor)
     const viewLength   = decodeVarint(buffer, cursor)
@@ -477,7 +477,7 @@ function decodeTypedArray(buffer : ArrayBuffer, typeTag: number, cursor : Cursor
     cursor.offset     += bufferLength
     const TypedArray   = constructorOfTypedArray(typeTag)
     const decodedView  = new TypedArray(sourceBuffer, byteOffset, viewLength)
-    memory.push(decodedView)
+    referrables.push(decodedView)
     return decodedView
 }
 
