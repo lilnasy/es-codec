@@ -1,4 +1,4 @@
-#es-codec
+# es-codec
 Es-codec is an efficient, zero-dependency, compact serialization library for Node, Deno, and browsers. It is tailor-made for client-server communication where both the client and server are modern js environments. It supports a subset of objects supported by structuredClone that are avaialable on all browser, server, and edge runtimes.
 
 ## Getting Started
@@ -13,14 +13,22 @@ deno cache https://github.com/lilnasy/es-codec/raw/main/es-codec.ts
 
 ## Usage
 ```ts
-import { encode, decode } from 'es-codec'
+// browser
+// import { encode, decode, NotSerializable } from 'https://cdn.jsdelivr.net/gh/lilnasy/es-codec/es-codec.js'
+// import { encode, decode, NotSerializable } from 'https://esm.sh/gh/lilnasy/es-codec'
 
-const object = { foo: 'bar' }
-const encodedObject : ArrayBuffer = encode(object)
+// deno
+// import { encode, decode, NotSerializable } from 'https://github.com/lilnasy/es-codec/raw/main/es-codec.ts'
+
+// node
+import { encode, decode, NotSerializable } from 'es-codec'
+
+const object        = { foo: 'bar' }
+const encodedObject = encode(object) satisfies ArrayBuffer
 const decodedObject = decode(encodedObject) as typeof object
 
-const array = [1, true, null, "foo"]
-const encodedArray : ArrayBuffer = encode(array)
+const array        = [1, true, null, "foo"]
+const encodedArray = encode(array) satisfies ArrayBuffer
 const decodedArray = decode(encodedArray) as typeof array
 
 const map        = new Map([['foo', 'bar']])
