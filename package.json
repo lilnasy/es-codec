@@ -2,23 +2,18 @@
     "name": "es-codec",
     "version": "0.1.0",
     "description": "",
-    "main": "index.ts",
+    "main": "es-codec.js",
     "keywords": [],
     "author": "lilnasy",
     "license": "Public Domain",
     "type": "module",
     "scripts": {
-        "build": "esbuild --bundle src/index.ts --outdir=dist --format=esm --platform=neutral --minify --sourcemap",
-        "start": "node --loader @swc-node/register/esm src/index.ts",
+        "build": "tsc es-codec.ts --target esnext --sourceMap --declaration",
         "test:node": "node tests/on-node.js",
         "test:deno": "deno test tests/on-deno.js",
-        "check": "deno check src/index.ts",
-        "lint": "deno lint src/index.ts"
+        "lint": "deno lint es-codec.ts"
     },
     "devDependencies": {
-        "@swc-node/register": "1.6.5",
-        "esbuild": "0.18.6",
-        "typescript": "5.1.3",
-        "deno": "npm:deno-npx@1.34.3"
+        "typescript": "5.1.6"
     }
 }

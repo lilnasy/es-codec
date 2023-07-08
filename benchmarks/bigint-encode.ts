@@ -1,5 +1,4 @@
-// @ts-ignore
-import { encodeBigInt } from "../src/index.ts"
+import { encodeBigInt } from "../es-codec.ts"
 
 function stringCastToFindBufferLength(bigint : bigint) {
     const uint64Count = Math.ceil(bigint.toString(16).length / 16)
@@ -20,20 +19,20 @@ function stringCastToFindBufferLength(bigint : bigint) {
     return buffer
 }
 
-globalThis?.Deno?.bench?.('control', _ => {
+Deno.bench?.('control', _ => {
     for (let i = 0; i < 100000; i++) {
         const rand = BigInt(Math.abs((Math.random() * 10**17) << 32))
     }
 })
 
-globalThis?.Deno?.bench?.('incumbent', _ => {
+Deno.bench('incumbent', _ => {
     for (let i = 0; i < 100000; i++) {
         const rand = BigInt(Math.abs((Math.random() * 10**17) << 32))
         encodeBigInt(rand)
     }
 })
 
-globalThis?.Deno?.bench?.('alternative', _ => {
+Deno.bench('alternative', _ => {
     for (let i = 0; i < 100000; i++) {
         const rand = BigInt(Math.abs((Math.random() * 10**17) << 32))
         stringCastToFindBufferLength(rand)

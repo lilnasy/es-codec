@@ -1,5 +1,4 @@
-// @ts-ignore
-import { encodeVarint } from "../src/index.ts"
+import { encodeVarint } from "../es-codec.ts"
 
 function intermediateArrayAllocation(num : number) {
     const result = new Array<number>
@@ -11,20 +10,20 @@ function intermediateArrayAllocation(num : number) {
     return new Uint8Array(result)
 }
 
-globalThis?.Deno?.bench?.('control', _ => {
+Deno.bench('control', _ => {
     for (let i = 0; i < 100000; i++) {
         const rand = Math.abs((Math.random() * 10**17) << 32)
     }
 })
 
-globalThis?.Deno?.bench?.('incumbent', _ => {
+Deno.bench('incumbent', _ => {
     for (let i = 0; i < 100000; i++) {
         const rand = Math.abs((Math.random() * 10**17) << 32)
         encodeVarint(rand)
     }
 })
 
-globalThis?.Deno?.bench?.('alternative', _ => {
+Deno.bench('alternative', _ => {
     for (let i = 0; i < 100000; i++) {
         const rand = Math.abs((Math.random() * 10**17) << 32)
         intermediateArrayAllocation(rand)

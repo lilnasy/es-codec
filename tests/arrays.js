@@ -1,4 +1,4 @@
-import { encode, decode } from "../dist/index.js"
+import { encode, decode } from "../es-codec.js"
 
 export default function (runner, assertEquals) {
     runner("Array", () => {
