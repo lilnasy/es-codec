@@ -54,7 +54,7 @@ type TypedArray =
     | BigInt64Array
     | BigUint64Array
 
-class NotSerializable extends Error {
+export class NotSerializable extends Error {
     constructor(readonly value : unknown) {
         super()
     }
@@ -113,6 +113,7 @@ export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, referrables
     if (typeTag === ARRAY)       return decodeArray(buffer, cursor, referrables)
     if (typeTag === OBJECT)      return decodeObject(buffer, cursor, referrables)
     if (typeTag === SET)         return decodeSet(buffer, cursor, referrables)
+    if (typeTag === MAP)         return decodeMap(buffer, cursor, referrables)
     if (typeTag & ERROR)         return decodeError(buffer, typeTag, cursor, referrables)
     if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(buffer, cursor, referrables)
     if (typeTag & ARRAYBUFFER)   return decodeTypedArray(buffer, typeTag, cursor, referrables)
@@ -120,7 +121,7 @@ export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, referrables
     throw new Unreachable
 }
 
-export function concatArrayBuffers(...buffers : ArrayBuffer[]){
+function concatArrayBuffers(...buffers : ArrayBuffer[]){
     
     let cumulativeSize = 0
     for (const buffer of buffers)
@@ -264,9 +265,11 @@ function encodeArray(array : unknown[], referrables : Memory) {
 }
 
 function decodeArray(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) {
-    const arrayLength = decodeVarint(buffer, cursor)
+    
     const result : unknown[] = []
     referrables.push(result)
+    
+    const arrayLength = decodeVarint(buffer, cursor)
     
     for (let i = 0; i < arrayLength; i++)
         result.push(decode(buffer, cursor, referrables))
@@ -399,7 +402,7 @@ function decodeError(buffer : ArrayBuffer, typeTag : number, cursor : Cursor, re
     const error : Error =
         cause === undefined
             ? new (constructorOfError(typeTag))(message)
-            // @ts-ignore
+            // @ts-ignore error cause has been supported by every major runtime since 2021
             : new (constructorOfError(typeTag))(message, { cause })
     
     error.stack = stack
@@ -493,7 +496,7 @@ function varIntByteCount(num: number): number {
 }
 
 // benchmarks/varint-encode.ts
-export function encodeVarint(num: number): Uint8Array {
+function encodeVarint(num: number): Uint8Array {
     
     const byteCount = varIntByteCount(num)
     const arr = new Uint8Array(byteCount)
