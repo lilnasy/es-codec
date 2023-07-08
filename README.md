@@ -1,5 +1,5 @@
 # es-codec
-Es-codec is an efficient, zero-dependency, compact serialization library for Node, Deno, and browsers. It is tailor-made for client-server communication where both the client and server are modern js environments. It supports a subset of objects supported by structuredClone that are avaialable on all browser, server, and edge runtimes.
+es-codec is an efficient, zero-dependency, compact serialization library for Node, Deno, and browsers. It is tailor-made for client-server communication where both the client and server are modern js environments. It supports a subset of objects supported by structuredClone that are avaialable on all browser, server, and edge runtimes.
 
 ## Getting Started
 ```bash
@@ -60,8 +60,15 @@ encode(object: unknown): ArrayBuffer
 decode(buffer: ArrayBuffer): unknown
 ```
 
+## Stability
+The binary format is subject to change until v1. For now, you will have to ensure that you are using the same version of es-codec on both the client and server.
+
 ## Limitations
 Generally, es-codec is more strict than `structuredClone`. It does not support serializing the following types:
 - null-prototype objects: `structuredClone` returns a plain object instead of a null-prototype one. This is likely unintended for users.
 - arrays with properties: Supporting this would cause either serialization to become much slower or the binary representation to become much larger.
 - Blob, File, ImageData: These are not universally supported among server runtimes.
+
+
+## Benchmarks
+TODO: include a benchmark comparing es-codec to JSON, devalue, msgpack, and protobuf for the objects supported by all formats.
