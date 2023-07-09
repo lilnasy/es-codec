@@ -41,13 +41,6 @@ export class NotSerializable extends Error {
         this.value = value;
     }
 }
-export class Malformed extends Error {
-    value;
-    constructor(value) {
-        super();
-        this.value = value;
-    }
-}
 class Unreachable extends Error {
 }
 export function encode(x, referrables = []) {
@@ -185,18 +178,39 @@ function decodeDate(buffer, cursor) {
     cursor.offset += 8;
     return new Date(view.getFloat64(0));
 }
+const REGEX_GLOBAL_FLAG      = 0b00001;
+const REGEX_IGNORE_CASE_FLAG = 0b00010;
+const REGEX_MULTILINE_FLAG   = 0b00100;
+const REGEX_UNICODE_FLAG     = 0b01000;
+const REGEX_STICKY_FLAG      = 0b10000;
 function encodeRegex(regex) {
-    const encodedBuffer = new TextEncoder().encode(regex.toString()).buffer;
+    const lastByte = 0
+        | (regex.global     ? REGEX_GLOBAL_FLAG      : 0)
+        | (regex.ignoreCase ? REGEX_IGNORE_CASE_FLAG : 0)
+        | (regex.multiline  ? REGEX_MULTILINE_FLAG   : 0)
+        | (regex.unicode    ? REGEX_UNICODE_FLAG     : 0)
+        | (regex.sticky     ? REGEX_STICKY_FLAG      : 0);
+    const numberOfPositiveFlags = 0
+        + (+regex.global)
+        + (+regex.ignoreCase)
+        + (+regex.multiline)
+        + (+regex.unicode)
+        + (+regex.sticky);
+    // regexString  = /blah/gi
+    // regexContent =  blah     // which is regexString.slice(1,-(numberOfPositiveFlags+1)
+    const encodedBuffer = new TextEncoder().encode(regex.toString().slice(1,-(numberOfPositiveFlags+1))).buffer;
     return concatArrayBuffers(Uint8Array.of(REGEX).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer);
 }
 function decodeRegex(buffer, cursor) {
-    const decodedString = decodeString(buffer, cursor)
-    const match = decodedString.match(/^\/(.*)\/([igymu]*)$/)
-    if (!match) {
-        throw new Malformed(`Tried to read regex ${decodedString} but it did not match the standard /regex/flags format (corrupted binary)`)
-    } else {
-        return new RegExp(match[1], match[2])
-    }
+    const decodedString = decodeString(buffer, cursor);
+    const lastByte = decodedString.charCodeAt(decodedString.length-1);
+    const flags = ""
+        + ((lastByte & REGEX_GLOBAL_FLAG     ) > 0 ? "g" : "")
+        + ((lastByte & REGEX_IGNORE_CASE_FLAG) > 0 ? "i" : "")
+        + ((lastByte & REGEX_MULTILINE_FLAG  ) > 0 ? "m" : "")
+        + ((lastByte & REGEX_UNICODE_FLAG    ) > 0 ? "u" : "")
+        + ((lastByte & REGEX_STICKY_FLAG     ) > 0 ? "y" : "");
+    return new RegExp(decodedString.slice(0,-1), flags);
 }
 // benchmarks/bigint-encode.ts
 export function encodeBigInt(bigint) {
