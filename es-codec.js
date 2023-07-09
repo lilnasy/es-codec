@@ -14,7 +14,7 @@ const ARRAY = 0b00001100;
 const OBJECT = 0b00001101;
 const SET = 0b00001110;
 const MAP = 0b00001111;
-// unused : https://github.com/tc39/proposal-record-tuple
+// https://github.com/tc39/proposal-record-tuple
 // const TUPLE     = 0b00010000
 // const RECORD    = 0b00010001
 const ERROR = 0b0100000;
