@@ -7,6 +7,7 @@ const FALSE     = 0b00000100
 const REFERENCE = 0b00000101
 const NUMBER    = 0b00000110
 const DATE      = 0b00000111
+const REGEX     = 0b00101101
 const STRING    = 0b00001000
 const BIGINTN   = 0b00001001
 const BIGINTP   = 0b00001010
@@ -60,6 +61,12 @@ export class NotSerializable extends Error {
     }
 }
 
+export class Malformed extends Error {
+    constructor(readonly value : unknown) {
+        super()
+    }
+}
+
 class Unreachable extends Error {}
 
 export function encode(x : unknown, referrables : Memory = []) : ArrayBuffer {
@@ -73,6 +80,7 @@ export function encode(x : unknown, referrables : Memory = []) : ArrayBuffer {
     /* simple types */
     if (x.constructor === Number) return encodeNumber(x)
     if (x.constructor === Date)   return encodeDate(x)
+    if (x.constructor === RegExp) return encodeRegex(x)
     
     /* lengthy types */
     if (x.constructor === BigInt) return encodeBigInt(x)
@@ -107,6 +115,7 @@ export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, referrables
     if (typeTag === REFERENCE)   return decodeReference(buffer, cursor, referrables)
     if (typeTag === NUMBER)      return decodeNumber(buffer, cursor)
     if (typeTag === DATE)        return decodeDate(buffer, cursor)
+    if (typeTag === REGEX)       return decodeRegex(buffer, cursor)
     if (typeTag === BIGINTP)     return decodeBigInt(buffer, cursor)
     if (typeTag === BIGINTN)     return -decodeBigInt(buffer, cursor)
     if (typeTag === STRING)      return decodeString(buffer, cursor)
@@ -188,6 +197,21 @@ function decodeDate(buffer : ArrayBuffer, cursor : Cursor) {
     const view = new DataView(buffer, cursor.offset)
     cursor.offset += 8
     return new Date(view.getFloat64(0))
+}
+
+function encodeRegex(regex : RegExp) {
+    const encodedBuffer = new TextEncoder().encode(regex.toString()).buffer;
+    return concatArrayBuffers(Uint8Array.of(REGEX).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer);
+}
+
+function decodeRegex(buffer : ArrayBuffer, cursor : Cursor) {
+    const decodedString = decodeString(buffer, cursor)
+    const match = decodedString.match(/^\/(.*)\/([igymu]*)$/)
+    if (!match) {
+        throw new Malformed(`Tried to read regex ${decodedString} but it did not match the standard /regex/flags format (corrupted binary)`)
+    } else {
+        return new RegExp(match[1], match[2])
+    }
 }
 
 // benchmarks/bigint-encode.ts

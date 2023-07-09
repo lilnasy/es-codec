@@ -6,6 +6,7 @@ const FALSE = 0b00000100;
 const REFERENCE = 0b00000101;
 const NUMBER = 0b00000110;
 const DATE = 0b00000111;
+const REGEX = 0b00101101
 const STRING = 0b00001000;
 const BIGINTN = 0b00001001;
 const BIGINTP = 0b00001010;
@@ -40,6 +41,13 @@ export class NotSerializable extends Error {
         this.value = value;
     }
 }
+export class Malformed extends Error {
+    value;
+    constructor(value) {
+        super();
+        this.value = value;
+    }
+}
 class Unreachable extends Error {
 }
 export function encode(x, referrables = []) {
@@ -57,6 +65,8 @@ export function encode(x, referrables = []) {
         return encodeNumber(x);
     if (x.constructor === Date)
         return encodeDate(x);
+    if (x.constructor === RegExp)
+        return encodeRegex(x);
     /* lengthy types */
     if (x.constructor === BigInt)
         return encodeBigInt(x);
@@ -99,6 +109,8 @@ export function decode(buffer, cursor = { offset: 0 }, referrables = []) {
         return decodeNumber(buffer, cursor);
     if (typeTag === DATE)
         return decodeDate(buffer, cursor);
+    if (typeTag === REGEX)
+        return decodeRegex(buffer, cursor);
     if (typeTag === BIGINTP)
         return decodeBigInt(buffer, cursor);
     if (typeTag === BIGINTN)
@@ -172,6 +184,19 @@ function decodeDate(buffer, cursor) {
     const view = new DataView(buffer, cursor.offset);
     cursor.offset += 8;
     return new Date(view.getFloat64(0));
+}
+function encodeRegex(regex) {
+    const encodedBuffer = new TextEncoder().encode(regex.toString()).buffer;
+    return concatArrayBuffers(Uint8Array.of(REGEX).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer);
+}
+function decodeRegex(buffer, cursor) {
+    const decodedString = decodeString(buffer, cursor)
+    const match = decodedString.match(/^\/(.*)\/([igymu]*)$/)
+    if (!match) {
+        throw new Malformed(`Tried to read regex ${decodedString} but it did not match the standard /regex/flags format (corrupted binary)`)
+    } else {
+        return new RegExp(match[1], match[2])
+    }
 }
 // benchmarks/bigint-encode.ts
 export function encodeBigInt(bigint) {

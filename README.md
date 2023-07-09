@@ -68,6 +68,7 @@ Generally, es-codec is more strict than `structuredClone`. It does not support s
 - null-prototype objects: `structuredClone` returns a plain object instead of a null-prototype one. This is likely unintended for users.
 - arrays with properties: Supporting this would cause either serialization to become much slower or the binary representation to become much larger.
 - Blob, File, ImageData: These are not universally supported among server runtimes.
+- RegExp objects will not save their index (e.g. the edgecase of `someRegex.exec("string");someRegex.exec("string")`)
 
 
 ## Benchmarks
