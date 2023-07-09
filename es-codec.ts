@@ -213,7 +213,7 @@ function encodeRegex(regex : RegExp) {
         + (+regex.sticky)
     // regexString  = /blah/gi
     // regexContent =  blah     // which is regexString.slice(1,-(numberOfPositiveFlags+1)
-    const encodedBuffer = new TextEncoder().encode(regex.toString().slice(1,-(numberOfPositiveFlags+1))).buffer
+    const encodedBuffer = new TextEncoder().encode(regex.toString().slice(1,-(numberOfPositiveFlags+1))+String.fromCharCode(lastByte)).buffer
     return concatArrayBuffers(Uint8Array.of(REGEX).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer)
 }
 
