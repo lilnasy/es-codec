@@ -12,7 +12,8 @@
         "build": "tsc es-codec.ts --target esnext --sourceMap --declaration",
         "test:node": "node tests/on-node.js",
         "test:deno": "deno test tests/on-deno.js",
-        "lint": "deno lint es-codec.ts"
+        "lint": "deno lint es-codec.ts",
+        "check": "deno check es-codec.ts"
     },
     "devDependencies": {
         "typescript": "5.1.6"
