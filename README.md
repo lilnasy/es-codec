@@ -36,19 +36,23 @@ const encodedMap = encode(map) satisfies ArrayBuffer
 const decodedMap = decode(encodedMap) as typeof map
 
 const set        = new Set(1, true, null, "foo")
-const encodedSet = encode(set) as ArrayBuffer 
+const encodedSet = encode(set) satisfies ArrayBuffer 
 const decodedSet = decode(encodedSet) as typeof set
 
 const date        = new Date()
-const encodedDate = encode(date) as ArrayBuffer
+const encodedDate = encode(date) satisfies ArrayBuffer
 const decodedDate = decode(encodedDate) as typeof date
 
-const Error        = new Error('foo')
-const encodedError = encode(Error) as ArrayBuffer
-const decodedError = decode(encodedError) as typeof Error
+const regexp        = /([A-Z])+/gm
+const encodedRegExp = encode(date) satisfies ArrayBuffer
+const decodedRegExp = decode(encodedDate) as typeof regexp
+
+const error        = new Error('foo')
+const encodedError = encode(Error) satisfies ArrayBuffer
+const decodedError = decode(encodedError) as typeof error
 
 const byteArray        = new Uint8Array([1, 2, 3])
-const encodedByteArray = encode(byteArray) as ArrayBuffer
+const encodedByteArray = encode(byteArray) satisfies ArrayBuffer
 const decodedByteArray = decode(encodedByteArray) as typeof byteArray
 ```
 
