@@ -1,0 +1,38 @@
+name: Test, lint, and type-check
+
+on: check_run
+
+jobs:
+  build-test-publish:
+    name: Test, lint, and type-check
+    runs-on: ubuntu-latest
+    steps:
+      
+      - name: Clone repository
+        uses: actions/checkout@v3
+      
+      - name: Setup Node 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+          registry-url: https://registry.npmjs.org/
+      
+      - name: Setup Deno 1.35
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.35
+      
+      - name: Build
+        run: deno task build
+      
+      - name: Test on Node
+        run: deno task test:node
+      
+      - name: Test on Deno
+        run: deno task test:deno
+      
+      - name: Lint
+        run: deno task lint
+      
+      - name: Type-check
+        run: deno task check
