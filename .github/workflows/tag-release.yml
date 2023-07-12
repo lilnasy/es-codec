@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Tag release
-      uses: halvardssm/github-action-tag-release@v1
+      uses: halvardssm/github-action-tag-release@main
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         path: "./package.json"
