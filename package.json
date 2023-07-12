@@ -1,12 +1,13 @@
 {
     "name": "es-codec",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "",
     "main": "es-codec.js",
     "keywords": [],
     "author": "lilnasy",
     "license": "Public Domain",
     "type": "module",
+    "files": [ "es-codec.ts", "es-codec.js", "es-codec.d.ts", "es-codec.js.map" "README.md", "LICENSE" ],
     "scripts": {
         "build": "tsc es-codec.ts --target esnext --sourceMap --declaration",
         "test:node": "node tests/on-node.js",
