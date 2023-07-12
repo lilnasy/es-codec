@@ -1,0 +1,16 @@
+name: Tag release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Tag release
+      uses: halvardssm/github-action-tag-release@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        path: "./package.json"
