@@ -55,9 +55,13 @@ const decodedByteArray = decode(encodedByteArray) as typeof byteArray
 ## API
 ```ts
 // throws NotSerializable if object is not serializable symbols, functions, class instances, etc.
-encode(object: unknown): ArrayBuffer
+function encode(x: unknown): ArrayBuffer
 
-decode(buffer: ArrayBuffer): unknown
+function decode(buffer: ArrayBuffer): unknown
+
+class NotSerializable extends Error {
+    value: unknown
+}
 ```
 
 ## Stability

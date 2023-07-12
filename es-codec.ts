@@ -65,7 +65,15 @@ export class NotSerializable extends Error {
 
 class Unreachable extends Error {}
 
-export function encode(x : unknown, referrables : Memory = []) : ArrayBuffer {
+export function encode(x : unknown) {
+    return encodeImpl(x)
+}
+
+export function decode(buffer : ArrayBuffer) {
+    return decodeImpl(buffer, { offset: 0 }, [])
+}
+
+function encodeImpl(x : unknown, referrables : Memory = []) : ArrayBuffer {
     
     /* unique types */
     if (x === null)      return Uint8Array.of(NULL).buffer
@@ -97,7 +105,7 @@ export function encode(x : unknown, referrables : Memory = []) : ArrayBuffer {
     throw new NotSerializable(x)
 }
 
-export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, referrables : Memory = []) : unknown {
+function decodeImpl(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) : unknown {
     const view    = new DataView(buffer, cursor.offset)
     
     const typeTag = view.getUint8(0)
@@ -194,7 +202,7 @@ function decodeDate(buffer : ArrayBuffer, cursor : Cursor) {
 }
 
 // benchmarks/bigint-encode.ts
-export function encodeBigInt(bigint : bigint) {
+function encodeBigInt(bigint : bigint) {
     
     const negative = bigint < 0n
     
@@ -263,7 +271,7 @@ function encodeArray(array : unknown[], referrables : Memory) {
     return concatArrayBuffers(
         Uint8Array.of(ARRAY).buffer,
         encodeVarint(array.length).buffer,
-        ...array.map(x => encode(x, referrables)!)
+        ...array.map(x => encodeImpl(x, referrables)!)
     )
 }
 
@@ -275,7 +283,7 @@ function decodeArray(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory
     const arrayLength = decodeVarint(buffer, cursor)
     
     for (let i = 0; i < arrayLength; i++)
-        result.push(decode(buffer, cursor, referrables))
+        result.push(decodeImpl(buffer, cursor, referrables))
     
     return result
 }
@@ -288,7 +296,7 @@ function encodeObject(object : Record<string, unknown>, referrables : Memory) : 
         ...keys.map(key =>
             concatArrayBuffers(
                 encodeString(key),
-                encode(object[key], referrables)!
+                encodeImpl(object[key], referrables)!
             )
         )
     )
@@ -303,7 +311,7 @@ function decodeObject(buffer : ArrayBuffer, cursor : Cursor, referrables : Memor
         // ignore the tag for the key, go directly to decoding it as a string
         cursor.offset += 1
         const key = decodeString(buffer, cursor)
-        result[key] = decode(buffer, cursor, referrables)
+        result[key] = decodeImpl(buffer, cursor, referrables)
     }
 
     return result
@@ -313,7 +321,7 @@ function encodeSet(set : Set<unknown>, referrables : Memory) {
     return concatArrayBuffers(
         Uint8Array.of(SET).buffer,
         encodeVarint(set.size).buffer,
-        ...[...set].map(value => encode(value, referrables)!)
+        ...[...set].map(value => encodeImpl(value, referrables)!)
     )
 }
 
@@ -323,7 +331,7 @@ function decodeSet(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) 
     referrables.push(result)
 
     for (let i = 0; i < setLength; i++) {
-        const element = decode(buffer, cursor, referrables)
+        const element = decodeImpl(buffer, cursor, referrables)
         result.add(element)
     }
     
@@ -336,8 +344,8 @@ function encodeMap(map : Map<unknown, unknown>, referrables : Memory) {
         encodeVarint(map.size).buffer,
         ...[...map].map(([key, value]) =>
             concatArrayBuffers(
-                encode(key, referrables)!,
-                encode(value, referrables)!
+                encodeImpl(key, referrables)!,
+                encodeImpl(value, referrables)!
             )
         )
     )
@@ -349,8 +357,8 @@ function decodeMap(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) 
     referrables.push(result)
 
     for (let i = 0; i < mapLength; i++) {
-        const key = decode(buffer, cursor, referrables)
-        const value = decode(buffer, cursor, referrables)
+        const key = decodeImpl(buffer, cursor, referrables)
+        const value = decodeImpl(buffer, cursor, referrables)
         result.set(key, value)
     }
 
@@ -388,7 +396,7 @@ function encodeError(error : Error, referrables : Memory) {
         Uint8Array.of(tagOfError(error)).buffer,
         encodeString(error.message),
         encodeString(error.stack ?? ''),
-        encode((error as unknown as { cause: unknown } ).cause, referrables)!
+        encodeImpl((error as unknown as { cause: unknown } ).cause, referrables)!
     )
 }
 
@@ -400,7 +408,7 @@ function decodeError(buffer : ArrayBuffer, typeTag : number, cursor : Cursor, re
     // ignore the tag for the stack, go directly to decoding it as a string
     cursor.offset += 1
     const stack = decodeString(buffer, cursor)
-    const cause = decode(buffer, cursor, referrables)
+    const cause = decodeImpl(buffer, cursor, referrables)
     
     const error : Error =
         cause === undefined
