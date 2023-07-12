@@ -1,9 +1,6 @@
 name: Publish to NPM
 
 on:
-  push:
-    branches:
-      publish-to-npm
   release:
     types: [created]
 
@@ -23,6 +20,8 @@ jobs:
         uses: denoland/setup-deno@v1
         with:
           deno-version: v1.35
+      - name: Type check
+        run: deno check es-codec.ts
       - name: Build
         run: npm run build
       - name: Test on Node
