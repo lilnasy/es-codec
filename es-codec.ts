@@ -203,40 +203,16 @@ function decodeDate(buffer : ArrayBuffer, cursor : Cursor) {
     return new Date(view.getFloat64(0))
 }
 
-const REGEX_GLOBAL_FLAG      = 0b00001
-const REGEX_IGNORE_CASE_FLAG = 0b00010
-const REGEX_MULTILINE_FLAG   = 0b00100
-const REGEX_UNICODE_FLAG     = 0b01000
-const REGEX_STICKY_FLAG      = 0b10000
 function encodeRegex(regex : RegExp) {
-    const lastByte = 0
-        | (regex.global     ? REGEX_GLOBAL_FLAG      : 0)
-        | (regex.ignoreCase ? REGEX_IGNORE_CASE_FLAG : 0)
-        | (regex.multiline  ? REGEX_MULTILINE_FLAG   : 0)
-        | (regex.unicode    ? REGEX_UNICODE_FLAG     : 0)
-        | (regex.sticky     ? REGEX_STICKY_FLAG      : 0)
-    const numberOfPositiveFlags = 0
-        + (+regex.global)
-        + (+regex.ignoreCase)
-        + (+regex.multiline)
-        + (+regex.unicode)
-        + (+regex.sticky)
-    // regexString  = /blah/gi
-    // regexContent =  blah     // which iss regexString.slice(1,-(numberOfPositiveFlags+1)
-    const encodedBuffer = new TextEncoder().encode(regex.toString().slice(1,-(numberOfPositiveFlags+1))+String.fromCharCode(lastByte)).buffer
-    return concatArrayBuffers(Uint8Array.of(REGEXP).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer)
+    return concatArrayBuffers(Uint8Array.of(REGEXP).buffer, encodeString(regex.source), encodeString(regex.flags))
 }
 
 function decodeRegex(buffer : ArrayBuffer, cursor : Cursor) {
-    const decodedString = decodeString(buffer, cursor)
-    const lastByte = decodedString.charCodeAt(decodedString.length-1)
-    const flags = ""
-        + ((lastByte & REGEX_GLOBAL_FLAG     ) > 0 ? "g" : "")
-        + ((lastByte & REGEX_IGNORE_CASE_FLAG) > 0 ? "i" : "")
-        + ((lastByte & REGEX_MULTILINE_FLAG  ) > 0 ? "m" : "")
-        + ((lastByte & REGEX_UNICODE_FLAG    ) > 0 ? "u" : "")
-        + ((lastByte & REGEX_STICKY_FLAG     ) > 0 ? "y" : "")
-    return new RegExp(decodedString.slice(0,-1), flags)
+    cursor.offset += 1 // the string tag
+    const source = decodeString(buffer, cursor);
+    cursor.offset += 1 // the string tag
+    const flags = decodeString(buffer, cursor);
+    return new RegExp(source, flags);
 }
 
 // benchmarks/bigint-encode.ts
