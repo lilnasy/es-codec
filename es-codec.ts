@@ -7,7 +7,7 @@ const FALSE     = 0b00000100
 const REFERENCE = 0b00000101
 const NUMBER    = 0b00000110
 const DATE      = 0b00000111
-const REGEXP    = 0b00001000
+const _REGEXP   = 0b00001000
 const STRING    = 0b00001001
 const BIGINTN   = 0b00001010
 const BIGINTP   = 0b00001011
@@ -15,10 +15,8 @@ const ARRAY     = 0b00001100
 const OBJECT    = 0b00001101
 const SET       = 0b00001110
 const MAP       = 0b00001111
-
-// https://github.com/tc39/proposal-record-tuple
-// const TUPLE     = 0b00010000
-// const RECORD    = 0b00010001
+const _RECORD   = 0b00010000 // https://github.com/tc39/proposal-record-tuple
+const _TUPLE    = 0b00010001
 
 const ERROR           = 0b0100000
 const EVAL_ERROR      = 0b0100001
