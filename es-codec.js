@@ -6,34 +6,36 @@ const FALSE = 0b00000100;
 const REFERENCE = 0b00000101;
 const NUMBER = 0b00000110;
 const DATE = 0b00000111;
-const REGEX = 0b00101101;
-const STRING = 0b00001000;
-const BIGINTN = 0b00001001;
-const BIGINTP = 0b00001010;
-const ARRAY = 0b00001011;
-const OBJECT = 0b00001100;
-const SET = 0b00001101;
-const MAP = 0b00001110;
-const ERROR = 0b0010000;
-const EVAL_ERROR = 0b0010001;
-const RANGE_ERROR = 0b0010010;
-const REFERENCE_ERROR = 0b0010011;
-const SYNTAX_ERROR = 0b0010100;
-const TYPE_ERROR = 0b0010101;
-const URI_ERROR = 0b0010110;
-const ARRAYBUFFER = 0b00100000;
-const DATAVIEW = 0b00100001;
-const INT8ARRAY = 0b00100010;
-const UINT8ARRAY = 0b00100011;
-const UINT8CLAMPEDARRAY = 0b00100100;
-const INT16ARRAY = 0b00100101;
-const UINT16ARRAY = 0b00100110;
-const INT32ARRAY = 0b00100111;
-const UINT32ARRAY = 0b00101000;
-const FLOAT32ARRAY = 0b00101001;
-const FLOAT64ARRAY = 0b00101010;
-const BIGINT64ARRAY = 0b00101011;
-const BIGUINT64ARRAY = 0b00101100;
+const REGEXP = 0b00001000;
+const STRING = 0b00001001;
+const BIGINTN = 0b00001010;
+const BIGINTP = 0b00001011;
+const ARRAY = 0b00001100;
+const OBJECT = 0b00001101;
+const SET = 0b00001110;
+const MAP = 0b00001111;
+const _RECORD = 0b00010000; // https://github.com/tc39/proposal-record-tuple
+const _TUPLE = 0b00010001;
+const ERROR = 0b0100000;
+const EVAL_ERROR = 0b0100001;
+const RANGE_ERROR = 0b0100010;
+const REFERENCE_ERROR = 0b0100011;
+const SYNTAX_ERROR = 0b0100100;
+const TYPE_ERROR = 0b0100101;
+const URI_ERROR = 0b0100110;
+const ARRAYBUFFER = 0b01000000;
+const DATAVIEW = 0b01000001;
+const INT8ARRAY = 0b01000010;
+const UINT8ARRAY = 0b01000011;
+const UINT8CLAMPEDARRAY = 0b01000100;
+const INT16ARRAY = 0b01000101;
+const UINT16ARRAY = 0b01000110;
+const INT32ARRAY = 0b01000111;
+const UINT32ARRAY = 0b01001000;
+const FLOAT32ARRAY = 0b01001001;
+const FLOAT64ARRAY = 0b01001010;
+const BIGINT64ARRAY = 0b01001011;
+const BIGUINT64ARRAY = 0b01001100;
 export class NotSerializable extends Error {
     value;
     constructor(value) {
@@ -43,7 +45,13 @@ export class NotSerializable extends Error {
 }
 class Unreachable extends Error {
 }
-export function encode(x, referrables = []) {
+export function encode(x) {
+    return encodeImpl(x);
+}
+export function decode(buffer) {
+    return decodeImpl(buffer, { offset: 0 }, []);
+}
+function encodeImpl(x, referrables = []) {
     /* unique types */
     if (x === null)
         return Uint8Array.of(NULL).buffer;
@@ -84,7 +92,7 @@ export function encode(x, referrables = []) {
         return maybeEncodeReference(x, referrables, encodeTypedArray);
     throw new NotSerializable(x);
 }
-export function decode(buffer, cursor = { offset: 0 }, referrables = []) {
+function decodeImpl(buffer, cursor, referrables) {
     const view = new DataView(buffer, cursor.offset);
     const typeTag = view.getUint8(0);
     cursor.offset += 1;
@@ -102,7 +110,7 @@ export function decode(buffer, cursor = { offset: 0 }, referrables = []) {
         return decodeNumber(buffer, cursor);
     if (typeTag === DATE)
         return decodeDate(buffer, cursor);
-    if (typeTag === REGEX)
+    if (typeTag === REGEXP)
         return decodeRegex(buffer, cursor);
     if (typeTag === BIGINTP)
         return decodeBigInt(buffer, cursor);
@@ -178,18 +186,18 @@ function decodeDate(buffer, cursor) {
     cursor.offset += 8;
     return new Date(view.getFloat64(0));
 }
-const REGEX_GLOBAL_FLAG      = 0b00001;
+const REGEX_GLOBAL_FLAG = 0b00001;
 const REGEX_IGNORE_CASE_FLAG = 0b00010;
-const REGEX_MULTILINE_FLAG   = 0b00100;
-const REGEX_UNICODE_FLAG     = 0b01000;
-const REGEX_STICKY_FLAG      = 0b10000;
+const REGEX_MULTILINE_FLAG = 0b00100;
+const REGEX_UNICODE_FLAG = 0b01000;
+const REGEX_STICKY_FLAG = 0b10000;
 function encodeRegex(regex) {
     const lastByte = 0
-        | (regex.global     ? REGEX_GLOBAL_FLAG      : 0)
+        | (regex.global ? REGEX_GLOBAL_FLAG : 0)
         | (regex.ignoreCase ? REGEX_IGNORE_CASE_FLAG : 0)
-        | (regex.multiline  ? REGEX_MULTILINE_FLAG   : 0)
-        | (regex.unicode    ? REGEX_UNICODE_FLAG     : 0)
-        | (regex.sticky     ? REGEX_STICKY_FLAG      : 0);
+        | (regex.multiline ? REGEX_MULTILINE_FLAG : 0)
+        | (regex.unicode ? REGEX_UNICODE_FLAG : 0)
+        | (regex.sticky ? REGEX_STICKY_FLAG : 0);
     const numberOfPositiveFlags = 0
         + (+regex.global)
         + (+regex.ignoreCase)
@@ -197,23 +205,23 @@ function encodeRegex(regex) {
         + (+regex.unicode)
         + (+regex.sticky);
     // regexString  = /blah/gi
-    // regexContent =  blah     // which is regexString.slice(1,-(numberOfPositiveFlags+1)
-    const encodedBuffer = new TextEncoder().encode(regex.toString().slice(1,-(numberOfPositiveFlags+1))+String.fromCharCode(lastByte)).buffer;
-    return concatArrayBuffers(Uint8Array.of(REGEX).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer);
+    // regexContent =  blah     // which iss regexString.slice(1,-(numberOfPositiveFlags+1)
+    const encodedBuffer = new TextEncoder().encode(regex.toString().slice(1, -(numberOfPositiveFlags + 1)) + String.fromCharCode(lastByte)).buffer;
+    return concatArrayBuffers(Uint8Array.of(REGEXP).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer);
 }
 function decodeRegex(buffer, cursor) {
     const decodedString = decodeString(buffer, cursor);
-    const lastByte = decodedString.charCodeAt(decodedString.length-1);
+    const lastByte = decodedString.charCodeAt(decodedString.length - 1);
     const flags = ""
-        + ((lastByte & REGEX_GLOBAL_FLAG     ) > 0 ? "g" : "")
+        + ((lastByte & REGEX_GLOBAL_FLAG) > 0 ? "g" : "")
         + ((lastByte & REGEX_IGNORE_CASE_FLAG) > 0 ? "i" : "")
-        + ((lastByte & REGEX_MULTILINE_FLAG  ) > 0 ? "m" : "")
-        + ((lastByte & REGEX_UNICODE_FLAG    ) > 0 ? "u" : "")
-        + ((lastByte & REGEX_STICKY_FLAG     ) > 0 ? "y" : "");
-    return new RegExp(decodedString.slice(0,-1), flags);
+        + ((lastByte & REGEX_MULTILINE_FLAG) > 0 ? "m" : "")
+        + ((lastByte & REGEX_UNICODE_FLAG) > 0 ? "u" : "")
+        + ((lastByte & REGEX_STICKY_FLAG) > 0 ? "y" : "");
+    return new RegExp(decodedString.slice(0, -1), flags);
 }
 // benchmarks/bigint-encode.ts
-export function encodeBigInt(bigint) {
+function encodeBigInt(bigint) {
     const negative = bigint < 0n;
     let b = negative ? -bigint : bigint;
     let uint64Count = 0;
@@ -264,19 +272,19 @@ function decodeString(buffer, cursor) {
 function encodeArray(array, referrables) {
     if (array.length !== Object.keys(array).length)
         throw new NotSerializable(array);
-    return concatArrayBuffers(Uint8Array.of(ARRAY).buffer, encodeVarint(array.length).buffer, ...array.map(x => encode(x, referrables)));
+    return concatArrayBuffers(Uint8Array.of(ARRAY).buffer, encodeVarint(array.length).buffer, ...array.map(x => encodeImpl(x, referrables)));
 }
 function decodeArray(buffer, cursor, referrables) {
     const result = [];
     referrables.push(result);
     const arrayLength = decodeVarint(buffer, cursor);
     for (let i = 0; i < arrayLength; i++)
-        result.push(decode(buffer, cursor, referrables));
+        result.push(decodeImpl(buffer, cursor, referrables));
     return result;
 }
 function encodeObject(object, referrables) {
     const keys = Object.keys(object);
-    return concatArrayBuffers(Uint8Array.of(OBJECT).buffer, encodeVarint(keys.length).buffer, ...keys.map(key => concatArrayBuffers(encodeString(key), encode(object[key], referrables))));
+    return concatArrayBuffers(Uint8Array.of(OBJECT).buffer, encodeVarint(keys.length).buffer, ...keys.map(key => concatArrayBuffers(encodeString(key), encodeImpl(object[key], referrables))));
 }
 function decodeObject(buffer, cursor, referrables) {
     const objectLength = decodeVarint(buffer, cursor);
@@ -286,33 +294,33 @@ function decodeObject(buffer, cursor, referrables) {
         // ignore the tag for the key, go directly to decoding it as a string
         cursor.offset += 1;
         const key = decodeString(buffer, cursor);
-        result[key] = decode(buffer, cursor, referrables);
+        result[key] = decodeImpl(buffer, cursor, referrables);
     }
     return result;
 }
 function encodeSet(set, referrables) {
-    return concatArrayBuffers(Uint8Array.of(SET).buffer, encodeVarint(set.size).buffer, ...[...set].map(value => encode(value, referrables)));
+    return concatArrayBuffers(Uint8Array.of(SET).buffer, encodeVarint(set.size).buffer, ...[...set].map(value => encodeImpl(value, referrables)));
 }
 function decodeSet(buffer, cursor, referrables) {
     const setLength = decodeVarint(buffer, cursor);
     const result = new Set;
     referrables.push(result);
     for (let i = 0; i < setLength; i++) {
-        const element = decode(buffer, cursor, referrables);
+        const element = decodeImpl(buffer, cursor, referrables);
         result.add(element);
     }
     return result;
 }
 function encodeMap(map, referrables) {
-    return concatArrayBuffers(Uint8Array.of(MAP).buffer, encodeVarint(map.size).buffer, ...[...map].map(([key, value]) => concatArrayBuffers(encode(key, referrables), encode(value, referrables))));
+    return concatArrayBuffers(Uint8Array.of(MAP).buffer, encodeVarint(map.size).buffer, ...[...map].map(([key, value]) => concatArrayBuffers(encodeImpl(key, referrables), encodeImpl(value, referrables))));
 }
 function decodeMap(buffer, cursor, referrables) {
     const mapLength = decodeVarint(buffer, cursor);
     const result = new Map;
     referrables.push(result);
     for (let i = 0; i < mapLength; i++) {
-        const key = decode(buffer, cursor, referrables);
-        const value = decode(buffer, cursor, referrables);
+        const key = decodeImpl(buffer, cursor, referrables);
+        const value = decodeImpl(buffer, cursor, referrables);
         result.set(key, value);
     }
     return result;
@@ -353,7 +361,7 @@ function constructorOfError(tag) {
     throw new Unreachable;
 }
 function encodeError(error, referrables) {
-    return concatArrayBuffers(Uint8Array.of(tagOfError(error)).buffer, encodeString(error.message), encodeString(error.stack ?? ''), encode(error.cause, referrables));
+    return concatArrayBuffers(Uint8Array.of(tagOfError(error)).buffer, encodeString(error.message), encodeString(error.stack ?? ''), encodeImpl(error.cause, referrables));
 }
 function decodeError(buffer, typeTag, cursor, referrables) {
     // ignore the tag for the message, go directly to decoding it as a string
@@ -362,10 +370,10 @@ function decodeError(buffer, typeTag, cursor, referrables) {
     // ignore the tag for the stack, go directly to decoding it as a string
     cursor.offset += 1;
     const stack = decodeString(buffer, cursor);
-    const cause = decode(buffer, cursor, referrables);
+    const cause = decodeImpl(buffer, cursor, referrables);
     const error = cause === undefined
         ? new (constructorOfError(typeTag))(message)
-        // @ts-ignore cause has been supported by all the runtimes since 2021
+        // @ts-ignore error cause has been supported by every major runtime since 2021
         : new (constructorOfError(typeTag))(message, { cause });
     error.stack = stack;
     return error;

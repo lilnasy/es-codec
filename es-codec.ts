@@ -7,36 +7,38 @@ const FALSE     = 0b00000100
 const REFERENCE = 0b00000101
 const NUMBER    = 0b00000110
 const DATE      = 0b00000111
-const REGEX     = 0b00101101
-const STRING    = 0b00001000
-const BIGINTN   = 0b00001001
-const BIGINTP   = 0b00001010
-const ARRAY     = 0b00001011
-const OBJECT    = 0b00001100
-const SET       = 0b00001101
-const MAP       = 0b00001110
+const REGEXP    = 0b00001000
+const STRING    = 0b00001001
+const BIGINTN   = 0b00001010
+const BIGINTP   = 0b00001011
+const ARRAY     = 0b00001100
+const OBJECT    = 0b00001101
+const SET       = 0b00001110
+const MAP       = 0b00001111
+const _RECORD   = 0b00010000 // https://github.com/tc39/proposal-record-tuple
+const _TUPLE    = 0b00010001
 
-const ERROR           = 0b0010000
-const EVAL_ERROR      = 0b0010001
-const RANGE_ERROR     = 0b0010010
-const REFERENCE_ERROR = 0b0010011
-const SYNTAX_ERROR    = 0b0010100
-const TYPE_ERROR      = 0b0010101
-const URI_ERROR       = 0b0010110
+const ERROR           = 0b0100000
+const EVAL_ERROR      = 0b0100001
+const RANGE_ERROR     = 0b0100010
+const REFERENCE_ERROR = 0b0100011
+const SYNTAX_ERROR    = 0b0100100
+const TYPE_ERROR      = 0b0100101
+const URI_ERROR       = 0b0100110
 
-const ARRAYBUFFER       = 0b00100000
-const DATAVIEW          = 0b00100001
-const INT8ARRAY         = 0b00100010
-const UINT8ARRAY        = 0b00100011
-const UINT8CLAMPEDARRAY = 0b00100100
-const INT16ARRAY        = 0b00100101
-const UINT16ARRAY       = 0b00100110
-const INT32ARRAY        = 0b00100111
-const UINT32ARRAY       = 0b00101000
-const FLOAT32ARRAY      = 0b00101001
-const FLOAT64ARRAY      = 0b00101010
-const BIGINT64ARRAY     = 0b00101011
-const BIGUINT64ARRAY    = 0b00101100
+const ARRAYBUFFER       = 0b01000000
+const DATAVIEW          = 0b01000001
+const INT8ARRAY         = 0b01000010
+const UINT8ARRAY        = 0b01000011
+const UINT8CLAMPEDARRAY = 0b01000100
+const INT16ARRAY        = 0b01000101
+const UINT16ARRAY       = 0b01000110
+const INT32ARRAY        = 0b01000111
+const UINT32ARRAY       = 0b01001000
+const FLOAT32ARRAY      = 0b01001001
+const FLOAT64ARRAY      = 0b01001010
+const BIGINT64ARRAY     = 0b01001011
+const BIGUINT64ARRAY    = 0b01001100
 
 type Cursor = { offset : number }
 
@@ -63,7 +65,15 @@ export class NotSerializable extends Error {
 
 class Unreachable extends Error {}
 
-export function encode(x : unknown, referrables : Memory = []) : ArrayBuffer {
+export function encode(x : unknown) {
+    return encodeImpl(x)
+}
+
+export function decode(buffer : ArrayBuffer) {
+    return decodeImpl(buffer, { offset: 0 }, [])
+}
+
+function encodeImpl(x : unknown, referrables : Memory = []) : ArrayBuffer {
     
     /* unique types */
     if (x === null)      return Uint8Array.of(NULL).buffer
@@ -96,7 +106,7 @@ export function encode(x : unknown, referrables : Memory = []) : ArrayBuffer {
     throw new NotSerializable(x)
 }
 
-export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, referrables : Memory = []) : unknown {
+function decodeImpl(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) : unknown {
     const view    = new DataView(buffer, cursor.offset)
     
     const typeTag = view.getUint8(0)
@@ -109,7 +119,7 @@ export function decode(buffer : ArrayBuffer, cursor = { offset: 0 }, referrables
     if (typeTag === REFERENCE)   return decodeReference(buffer, cursor, referrables)
     if (typeTag === NUMBER)      return decodeNumber(buffer, cursor)
     if (typeTag === DATE)        return decodeDate(buffer, cursor)
-    if (typeTag === REGEX)       return decodeRegex(buffer, cursor)
+    if (typeTag === REGEXP)      return decodeRegex(buffer, cursor)
     if (typeTag === BIGINTP)     return decodeBigInt(buffer, cursor)
     if (typeTag === BIGINTN)     return -decodeBigInt(buffer, cursor)
     if (typeTag === STRING)      return decodeString(buffer, cursor)
@@ -212,9 +222,9 @@ function encodeRegex(regex : RegExp) {
         + (+regex.unicode)
         + (+regex.sticky)
     // regexString  = /blah/gi
-    // regexContent =  blah     // which is regexString.slice(1,-(numberOfPositiveFlags+1)
+    // regexContent =  blah     // which iss regexString.slice(1,-(numberOfPositiveFlags+1)
     const encodedBuffer = new TextEncoder().encode(regex.toString().slice(1,-(numberOfPositiveFlags+1))+String.fromCharCode(lastByte)).buffer
-    return concatArrayBuffers(Uint8Array.of(REGEX).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer)
+    return concatArrayBuffers(Uint8Array.of(REGEXP).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer)
 }
 
 function decodeRegex(buffer : ArrayBuffer, cursor : Cursor) {
@@ -230,7 +240,7 @@ function decodeRegex(buffer : ArrayBuffer, cursor : Cursor) {
 }
 
 // benchmarks/bigint-encode.ts
-export function encodeBigInt(bigint : bigint) {
+function encodeBigInt(bigint : bigint) {
     
     const negative = bigint < 0n
     
@@ -299,7 +309,7 @@ function encodeArray(array : unknown[], referrables : Memory) {
     return concatArrayBuffers(
         Uint8Array.of(ARRAY).buffer,
         encodeVarint(array.length).buffer,
-        ...array.map(x => encode(x, referrables)!)
+        ...array.map(x => encodeImpl(x, referrables)!)
     )
 }
 
@@ -311,7 +321,7 @@ function decodeArray(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory
     const arrayLength = decodeVarint(buffer, cursor)
     
     for (let i = 0; i < arrayLength; i++)
-        result.push(decode(buffer, cursor, referrables))
+        result.push(decodeImpl(buffer, cursor, referrables))
     
     return result
 }
@@ -324,7 +334,7 @@ function encodeObject(object : Record<string, unknown>, referrables : Memory) : 
         ...keys.map(key =>
             concatArrayBuffers(
                 encodeString(key),
-                encode(object[key], referrables)!
+                encodeImpl(object[key], referrables)!
             )
         )
     )
@@ -339,7 +349,7 @@ function decodeObject(buffer : ArrayBuffer, cursor : Cursor, referrables : Memor
         // ignore the tag for the key, go directly to decoding it as a string
         cursor.offset += 1
         const key = decodeString(buffer, cursor)
-        result[key] = decode(buffer, cursor, referrables)
+        result[key] = decodeImpl(buffer, cursor, referrables)
     }
 
     return result
@@ -349,7 +359,7 @@ function encodeSet(set : Set<unknown>, referrables : Memory) {
     return concatArrayBuffers(
         Uint8Array.of(SET).buffer,
         encodeVarint(set.size).buffer,
-        ...[...set].map(value => encode(value, referrables)!)
+        ...[...set].map(value => encodeImpl(value, referrables)!)
     )
 }
 
@@ -359,7 +369,7 @@ function decodeSet(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) 
     referrables.push(result)
 
     for (let i = 0; i < setLength; i++) {
-        const element = decode(buffer, cursor, referrables)
+        const element = decodeImpl(buffer, cursor, referrables)
         result.add(element)
     }
     
@@ -372,8 +382,8 @@ function encodeMap(map : Map<unknown, unknown>, referrables : Memory) {
         encodeVarint(map.size).buffer,
         ...[...map].map(([key, value]) =>
             concatArrayBuffers(
-                encode(key, referrables)!,
-                encode(value, referrables)!
+                encodeImpl(key, referrables)!,
+                encodeImpl(value, referrables)!
             )
         )
     )
@@ -385,8 +395,8 @@ function decodeMap(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) 
     referrables.push(result)
 
     for (let i = 0; i < mapLength; i++) {
-        const key = decode(buffer, cursor, referrables)
-        const value = decode(buffer, cursor, referrables)
+        const key = decodeImpl(buffer, cursor, referrables)
+        const value = decodeImpl(buffer, cursor, referrables)
         result.set(key, value)
     }
 
@@ -424,7 +434,7 @@ function encodeError(error : Error, referrables : Memory) {
         Uint8Array.of(tagOfError(error)).buffer,
         encodeString(error.message),
         encodeString(error.stack ?? ''),
-        encode((error as unknown as { cause: unknown } ).cause, referrables)!
+        encodeImpl((error as unknown as { cause: unknown } ).cause, referrables)!
     )
 }
 
@@ -436,7 +446,7 @@ function decodeError(buffer : ArrayBuffer, typeTag : number, cursor : Cursor, re
     // ignore the tag for the stack, go directly to decoding it as a string
     cursor.offset += 1
     const stack = decodeString(buffer, cursor)
-    const cause = decode(buffer, cursor, referrables)
+    const cause = decodeImpl(buffer, cursor, referrables)
     
     const error : Error =
         cause === undefined
