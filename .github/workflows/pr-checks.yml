@@ -2,13 +2,9 @@ name: Test, lint, and type-check
 
 on:
   pull_request:
-  push:
-    branches:
-      Setup-status-checks
 
 jobs:
-  build-test-publish:
-    name: Test, lint, and type-check
+  main:
     runs-on: ubuntu-latest
     steps:
       
