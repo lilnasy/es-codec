@@ -7,7 +7,7 @@ const FALSE     = 0b00000100
 const REFERENCE = 0b00000101
 const NUMBER    = 0b00000110
 const DATE      = 0b00000111
-const _REGEXP   = 0b00001000
+const REGEXP    = 0b00001000
 const STRING    = 0b00001001
 const BIGINTN   = 0b00001010
 const BIGINTP   = 0b00001011
@@ -84,6 +84,7 @@ function encodeImpl(x : unknown, referrables : Memory = []) : ArrayBuffer {
     /* simple types */
     if (x.constructor === Number) return encodeNumber(x)
     if (x.constructor === Date)   return encodeDate(x)
+    if (x.constructor === RegExp) return encodeRegex(x)
     
     /* lengthy types */
     if (x.constructor === BigInt) return encodeBigInt(x)
@@ -118,6 +119,7 @@ function decodeImpl(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory)
     if (typeTag === REFERENCE)   return decodeReference(buffer, cursor, referrables)
     if (typeTag === NUMBER)      return decodeNumber(buffer, cursor)
     if (typeTag === DATE)        return decodeDate(buffer, cursor)
+    if (typeTag === REGEXP)      return decodeRegex(buffer, cursor)
     if (typeTag === BIGINTP)     return decodeBigInt(buffer, cursor)
     if (typeTag === BIGINTN)     return -decodeBigInt(buffer, cursor)
     if (typeTag === STRING)      return decodeString(buffer, cursor)
@@ -199,6 +201,18 @@ function decodeDate(buffer : ArrayBuffer, cursor : Cursor) {
     const view = new DataView(buffer, cursor.offset)
     cursor.offset += 8
     return new Date(view.getFloat64(0))
+}
+
+function encodeRegex(regex : RegExp) {
+    return concatArrayBuffers(Uint8Array.of(REGEXP).buffer, encodeString(regex.source), encodeString(regex.flags))
+}
+
+function decodeRegex(buffer : ArrayBuffer, cursor : Cursor) {
+    cursor.offset += 1 // the string tag
+    const source = decodeString(buffer, cursor);
+    cursor.offset += 1 // the string tag
+    const flags = decodeString(buffer, cursor);
+    return new RegExp(source, flags);
 }
 
 // benchmarks/bigint-encode.ts
