@@ -187,12 +187,12 @@ function decodeDate(buffer, cursor) {
     return new Date(view.getFloat64(0));
 }
 function encodeRegex(regex) {
-    return concatArrayBuffers(Uint8Array.of(REGEXP).buffer, encodeString(regex.source), encodeString(regex.flags))
+    return concatArrayBuffers(Uint8Array.of(REGEXP).buffer, encodeString(regex.source), encodeString(regex.flags));
 }
 function decodeRegex(buffer, cursor) {
-    cursor.offset += 1 // the string tag
+    cursor.offset += 1; // the string tag
     const source = decodeString(buffer, cursor);
-    cursor.offset += 1 // the string tag
+    cursor.offset += 1; // the string tag
     const flags = decodeString(buffer, cursor);
     return new RegExp(source, flags);
 }
