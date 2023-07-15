@@ -3,22 +3,23 @@ es-codec is an efficient, zero-dependency, compact serialization library for Nod
 
 ## Getting Started
 ```bash
-npm install lilnasy/es-codec
-pnpm add lilnasy/es-codec
-yarn add lilnasy/es-codec
+npm install es-codec
+pnpm add es-codec
+yarn add es-codec
 ```
 ```bash
-deno cache https://github.com/lilnasy/es-codec/raw/main/es-codec.ts
+deno cache https://deno.land/x/escodec/es-codec.ts
 ```
 
 ## Usage
 ```ts
 // browser
-// import { encode, decode, NotSerializable } from 'https://cdn.jsdelivr.net/gh/lilnasy/es-codec/es-codec.js'
-// import { encode, decode, NotSerializable } from 'https://esm.sh/gh/lilnasy/es-codec'
+// import { encode, decode, NotSerializable } from 'https://cdn.jsdelivr.net/npm/es-codec/es-codec.js'
+// import { encode, decode, NotSerializable } from 'https://esm.sh/es-codec/es-codec.js'
+// import { encode, decode, NotSerializable } from 'https://unpkg.com/es-codec/es-codec.js'
 
 // deno
-// import { encode, decode, NotSerializable } from 'https://github.com/lilnasy/es-codec/raw/main/es-codec.ts'
+// import { encode, decode, NotSerializable } from 'https://deno.land/x/escodec/es-codec.ts'
 
 // node
 import { encode, decode, NotSerializable } from 'es-codec'
