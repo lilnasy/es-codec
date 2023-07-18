@@ -46,33 +46,41 @@ const EXTENSION         = 0b10000000
 /***** PUBLIC API *****/
 
 export class NotSerializable extends Error {
-    name = "NotSerializableError"
+    name = "NotSerializableError" as const
     constructor(readonly value : unknown) {
         super()
     }
 }
 
-export interface Extension<T> {
+export interface Extension<T, ReducedType> {
+    name   : string
     when   : (x      : unknown)     => x is T
-    encode : (x      : T)           => ArrayBuffer
-    decode : (buffer : ArrayBuffer) => T
+    encode : (x      : T)           => ReducedType
+    decode : (buffer : ReducedType) => T
 }
 
-export function createCodec(extensions: Extension<unknown>[]) {
+export function createCodec(extensions: Extension<unknown, unknown>[]) {
     
     if (extensions.length > 128) throw new Error("es-codec: createCodec: The number of extensions must be less than 128. Found: " + extensions.length)
     
-    const extensionsInternal = new Array<ExtensionInternal<unknown>>
+    const extensionsInternal = new Array<InternalExtension>
 
-    let i = 0
-
-    for (const { when, encode, decode } of extensions) {
-        const typeTag = EXTENSION | i++
+    for (const ext of extensions) {
         extensionsInternal.push({
-            when,
-            encode(x) { return concatArrayBuffers(Uint8Array.of(typeTag).buffer, encode(x)) },
-            decode,
-            typeTag
+            name: ext.name,
+            when: ext.when,
+            encodeImpl(x, referrables, extensions) {
+                return concatArrayBuffers(
+                    Uint8Array.of(EXTENSION).buffer,
+                    encodeImpl(ext.name, referrables, extensions),
+                    encodeImpl(ext.encode(x), referrables, extensions)
+                )
+            },
+            decodeImpl(buffer, cursor, referrables, extensions) {
+                const result = ext.decode(decodeImpl(buffer, cursor, referrables, extensions))
+                referrables.push(result)
+                return result
+            }
         })
     }
     
@@ -115,10 +123,13 @@ type TypedArray =
     | BigInt64Array
     | BigUint64Array
 
-class Unreachable extends Error { name = "UnreachableError" }
+class Unreachable extends Error { name = "UnreachableError" as const }
 
-interface ExtensionInternal<T> extends Extension<T> {
-    typeTag : number
+interface InternalExtension {
+    name       : string
+    when       : (x : unknown) => boolean
+    encodeImpl : typeof encodeImpl
+    decodeImpl : typeof decodeImpl
 }
 
 
@@ -127,7 +138,7 @@ interface ExtensionInternal<T> extends Extension<T> {
 function encodeImpl(
     x           : unknown,
     referrables : Memory,
-    extensions  : ExtensionInternal<unknown>[]
+    extensions  : InternalExtension[]
 ) : ArrayBuffer {
     
     /* unique types */
@@ -161,16 +172,16 @@ function encodeImpl(
     /* extension types */
     for (const extension of extensions)
         if (extension.when(x))
-            return maybeEncodeReference(x, referrables, extensions, extension.encode)
+            return maybeEncodeReference(x, referrables, extensions, extension.encodeImpl)
 
-    throw new NotSerializable(x) 
+    throw new NotSerializable(x)
 }
 
 function decodeImpl(
     buffer      : ArrayBuffer,
     cursor      : Cursor,
     referrables : Memory,
-    extensions  : ExtensionInternal<unknown>[]
+    extensions  : InternalExtension[]
 ) : unknown {
     const view    = new DataView(buffer, cursor.offset)
     
@@ -196,11 +207,11 @@ function decodeImpl(
     if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(buffer, cursor, referrables)
     if (typeTag & ARRAYBUFFER)   return decodeTypedArray(buffer, typeTag, cursor, referrables)
     if (typeTag & EXTENSION) {
-        const i = typeTag & ~EXTENSION
-        const extension = extensions[i]
-        if (extension === undefined) throw new Unreachable
-        const extensionBuffer = buffer.slice(cursor.offset)
-        return extension.decode(extensionBuffer)
+        const name = decodeImpl(buffer, cursor, referrables, extensions) as string
+        
+        for (const ext of extensions)
+            if (ext.name === name)
+                return ext.decodeImpl(buffer, cursor, referrables, extensions)
     }
 
     throw new Unreachable
@@ -209,8 +220,8 @@ function decodeImpl(
 function maybeEncodeReference<T>(
     value       : T,
     referrables : Memory,
-    extensions  : ExtensionInternal<unknown>[],
-    encoder     : (x : T, referrables : Memory, extensions : ExtensionInternal<unknown>[]) => ArrayBuffer
+    extensions  : InternalExtension[],
+    encoder     : (x : T, referrables : Memory, extensions : InternalExtension[]) => ArrayBuffer
 ) {
     const alreadyEncoded = referrables.indexOf(value)
     
@@ -339,7 +350,7 @@ function decodeString(buffer : ArrayBuffer, cursor : Cursor) {
 function encodeArray(
     array       : unknown[],
     referrables : Memory,
-    extensions  : ExtensionInternal<unknown>[]
+    extensions  : InternalExtension[]
 ) {
     if (array.length !== Object.keys(array).length) throw new NotSerializable(array)
     return concatArrayBuffers(
@@ -349,7 +360,12 @@ function encodeArray(
     )
 }
 
-function decodeArray(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory, extensions : ExtensionInternal<unknown>[]) {
+function decodeArray(
+    buffer      : ArrayBuffer,
+    cursor      : Cursor,
+    referrables : Memory,
+    extensions  : InternalExtension[]
+) {
     
     const result : unknown[] = []
     referrables.push(result)
@@ -365,7 +381,7 @@ function decodeArray(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory
 function encodeObject(
     object      : Record<string, unknown>,
     referrables : Memory,
-    extensions  : ExtensionInternal<unknown>[]
+    extensions  : InternalExtension[]
 ) : ArrayBuffer {
     const keys = Object.keys(object)
     return concatArrayBuffers(
@@ -384,7 +400,7 @@ function decodeObject(
     buffer      : ArrayBuffer,
     cursor      : Cursor,
     referrables : Memory,
-    extensions  : ExtensionInternal<unknown>[]
+    extensions  : InternalExtension[]
 ) {
     const objectLength = decodeVarint(buffer, cursor)
     const result : Record<string, unknown> = {}
@@ -403,7 +419,7 @@ function decodeObject(
 function encodeSet(
     set         : Set<unknown>,
     referrables : Memory,
-    extensions  : ExtensionInternal<unknown>[]
+    extensions  : InternalExtension[]
 ) {
     return concatArrayBuffers(
         Uint8Array.of(SET).buffer,
@@ -416,7 +432,7 @@ function decodeSet(
     buffer      : ArrayBuffer,
     cursor      : Cursor,
     referrables : Memory,
-    extensions  : ExtensionInternal<unknown>[]
+    extensions  : InternalExtension[]
 ) {
     const setLength = decodeVarint(buffer, cursor)
     const result = new Set
@@ -433,7 +449,7 @@ function decodeSet(
 function encodeMap(
     map : Map<unknown, unknown>,
     referrables : Memory,
-    extensions : ExtensionInternal<unknown>[]
+    extensions : InternalExtension[]
 ) {
     return concatArrayBuffers(
         Uint8Array.of(MAP).buffer,
@@ -451,7 +467,7 @@ function decodeMap(
     buffer      : ArrayBuffer,
     cursor      : Cursor,
     referrables : Memory,
-    extensions  : ExtensionInternal<unknown>[]
+    extensions  : InternalExtension[]
 ) {
     const mapLength = decodeVarint(buffer, cursor)
     const result = new Map
@@ -492,7 +508,11 @@ function constructorOfError(tag : number) {
     throw new Unreachable
 }
 
-function encodeError(error : Error, referrables : Memory, extensions : ExtensionInternal<unknown>[]) {
+function encodeError(
+    error       : Error,
+    referrables : Memory,
+    extensions  : InternalExtension[]
+) {
     return concatArrayBuffers(
         Uint8Array.of(tagOfError(error)).buffer,
         encodeString(error.message),
@@ -506,7 +526,7 @@ function decodeError(
     typeTag     : number,
     cursor      : Cursor,
     referrables : Memory,
-    extensions  : ExtensionInternal<unknown>[]
+    extensions  : InternalExtension[]
 ) {
     // ignore the tag for the message, go directly to decoding it as a string
     cursor.offset += 1

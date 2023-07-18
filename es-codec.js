@@ -50,14 +50,18 @@ export function createCodec(extensions) {
     if (extensions.length > 128)
         throw new Error("es-codec: createCodec: The number of extensions must be less than 128. Found: " + extensions.length);
     const extensionsInternal = new Array;
-    let i = 0;
-    for (const { when, encode, decode } of extensions) {
-        const typeTag = EXTENSION | i++;
+    for (const ext of extensions) {
         extensionsInternal.push({
-            when,
-            encode(x) { return concatArrayBuffers(Uint8Array.of(typeTag).buffer, encode(x)); },
-            decode,
-            typeTag
+            name: ext.name,
+            when: ext.when,
+            encodeImpl(x, referrables, extensions) {
+                return concatArrayBuffers(Uint8Array.of(EXTENSION).buffer, encodeImpl(ext.name, referrables, extensions), encodeImpl(ext.encode(x), referrables, extensions));
+            },
+            decodeImpl(buffer, cursor, referrables, extensions) {
+                const result = ext.decode(decodeImpl(buffer, cursor, referrables, extensions));
+                referrables.push(result);
+                return result;
+            }
         });
     }
     function encode(x) {
@@ -120,7 +124,7 @@ function encodeImpl(x, referrables, extensions) {
     /* extension types */
     for (const extension of extensions)
         if (extension.when(x))
-            return maybeEncodeReference(x, referrables, extensions, extension.encode);
+            return maybeEncodeReference(x, referrables, extensions, extension.encodeImpl);
     throw new NotSerializable(x);
 }
 function decodeImpl(buffer, cursor, referrables, extensions) {
@@ -164,12 +168,10 @@ function decodeImpl(buffer, cursor, referrables, extensions) {
     if (typeTag & ARRAYBUFFER)
         return decodeTypedArray(buffer, typeTag, cursor, referrables);
     if (typeTag & EXTENSION) {
-        const i = typeTag & ~EXTENSION;
-        const extension = extensions[i];
-        if (extension === undefined)
-            throw new Unreachable;
-        const extensionBuffer = buffer.slice(cursor.offset);
-        return extension.decode(extensionBuffer);
+        const name = decodeImpl(buffer, cursor, referrables, extensions);
+        for (const ext of extensions)
+            if (ext.name === name)
+                return ext.decodeImpl(buffer, cursor, referrables, extensions);
     }
     throw new Unreachable;
 }

@@ -2,15 +2,16 @@
 /***** PUBLIC API *****/
 export declare class NotSerializable extends Error {
     readonly value: unknown;
-    name: string;
+    name: "NotSerializableError";
     constructor(value: unknown);
 }
-export interface Extension<T> {
+export interface Extension<T, ReducedType> {
+    name: string;
     when: (x: unknown) => x is T;
-    encode: (x: T) => ArrayBuffer;
-    decode: (buffer: ArrayBuffer) => T;
+    encode: (x: T) => ReducedType;
+    decode: (buffer: ReducedType) => T;
 }
-export declare function createCodec(extensions: Extension<unknown>[]): {
+export declare function createCodec(extensions: Extension<unknown, unknown>[]): {
     encode: (x: unknown) => ArrayBuffer;
     decode: (buffer: ArrayBuffer) => unknown;
 };
