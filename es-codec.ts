@@ -18,13 +18,13 @@ const MAP       = 0b00001111
 const _RECORD   = 0b00010000 // https://github.com/tc39/proposal-record-tuple
 const _TUPLE    = 0b00010001
 
-const ERROR           = 0b0100000
-const EVAL_ERROR      = 0b0100001
-const RANGE_ERROR     = 0b0100010
-const REFERENCE_ERROR = 0b0100011
-const SYNTAX_ERROR    = 0b0100100
-const TYPE_ERROR      = 0b0100101
-const URI_ERROR       = 0b0100110
+const ERROR           = 0b00100000
+const EVAL_ERROR      = 0b00100001
+const RANGE_ERROR     = 0b00100010
+const REFERENCE_ERROR = 0b00100011
+const SYNTAX_ERROR    = 0b00100100
+const TYPE_ERROR      = 0b00100101
+const URI_ERROR       = 0b00100110
 
 const ARRAYBUFFER       = 0b01000000
 const DATAVIEW          = 0b01000001
@@ -171,7 +171,7 @@ function encodeImpl(
     
     /* extension types */
     for (const extension of extensions)
-        if (extension.when(x))
+        if (extension.when(x) === true)
             return maybeEncodeReference(x, referrables, extensions, extension.encodeImpl)
 
     throw new NotSerializable(x)
