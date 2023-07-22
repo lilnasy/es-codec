@@ -503,7 +503,7 @@ function decodeError(self: Decoder<unknown>, buffer : ArrayBuffer, typeTag : num
     return error
 }
 
-function encodeArrayBuffer(self : Encoder<unknown>, buffer : ArrayBuffer) {
+function encodeArrayBuffer(_ : Encoder<unknown>, buffer : ArrayBuffer) {
     return concatArrayBuffers(
         Uint8Array.of(ARRAYBUFFER).buffer,
         encodeVarint(buffer.byteLength).buffer,

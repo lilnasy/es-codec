@@ -382,7 +382,7 @@ function decodeError(self, buffer, typeTag) {
     error.stack = stack;
     return error;
 }
-function encodeArrayBuffer(self, buffer) {
+function encodeArrayBuffer(_, buffer) {
     return concatArrayBuffers(Uint8Array.of(ARRAYBUFFER).buffer, encodeVarint(buffer.byteLength).buffer, buffer);
 }
 function decodeArrayBuffer(self, buffer) {
