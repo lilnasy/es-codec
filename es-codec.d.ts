@@ -5,15 +5,15 @@ export declare class NotSerializable extends Error {
     name: "NotSerializableError";
     constructor(value: unknown);
 }
-export interface Extension<T, ReducedType> {
+export interface Extension<Extended, ReducedType, Context> {
     name: string;
-    when: (x: unknown) => x is T;
-    encode: (x: T) => ReducedType;
-    decode: (buffer: ReducedType) => T;
+    when: (x: unknown, context: Context) => x is Extended;
+    encode: (x: Extended, context: Context) => ReducedType;
+    decode: (buffer: ReducedType, context: Context) => Extended;
 }
-export declare function createCodec(extensions: Extension<unknown, unknown>[]): {
-    encode: (x: unknown) => ArrayBuffer;
-    decode: (buffer: ArrayBuffer) => unknown;
+export declare function createCodec<Context = unknown>(extensions: Extension<unknown, unknown, unknown>[]): {
+    encode: (x: unknown, context: Context) => ArrayBuffer;
+    decode: (buffer: ArrayBuffer, context: Context) => unknown;
 };
 export declare function encode(x: unknown): ArrayBuffer;
 export declare function decode(buffer: ArrayBuffer): unknown;

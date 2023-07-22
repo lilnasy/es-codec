@@ -52,14 +52,14 @@ export class NotSerializable extends Error {
     }
 }
 
-export interface Extension<T, ReducedType> {
+export interface Extension<Extended, ReducedType, Context> {
     name   : string
-    when   : (x      : unknown)     => x is T
-    encode : (x      : T)           => ReducedType
-    decode : (buffer : ReducedType) => T
+    when   : (x      : unknown    , context : Context) => x is Extended
+    encode : (x      : Extended   , context : Context) => ReducedType
+    decode : (buffer : ReducedType, context : Context) => Extended
 }
 
-export function createCodec(extensions: Extension<unknown, unknown>[]) {
+export function createCodec<Context = unknown>(extensions: Extension<unknown, unknown, unknown>[]) {
     
     if (extensions.length > 128) throw new Error("es-codec: createCodec: The number of extensions must be less than 128. Found: " + extensions.length)
     
@@ -69,44 +69,55 @@ export function createCodec(extensions: Extension<unknown, unknown>[]) {
         extensionsInternal.push({
             name: ext.name,
             when: ext.when,
-            encodeImpl(x, referrables, extensions) {
+            encodeImpl(self, x) {
                 return concatArrayBuffers(
                     Uint8Array.of(EXTENSION).buffer,
-                    encodeImpl(ext.name, referrables, extensions),
-                    encodeImpl(ext.encode(x), referrables, extensions)
+                    encodeImpl(self, ext.name),
+                    encodeImpl(self, ext.encode(x, self.context))
                 )
             },
-            decodeImpl(buffer, cursor, referrables, extensions) {
-                const result = ext.decode(decodeImpl(buffer, cursor, referrables, extensions))
-                referrables.push(result)
+            decodeImpl(self, buffer) {
+                const result = ext.decode(decodeImpl(self, buffer), self.context)
+                self.referrables.push(result)
                 return result
             }
         })
     }
     
-    function encode(x : unknown) {
-        return encodeImpl(x, [], extensionsInternal)
+    function encode(x : unknown, context : Context) {
+        return encodeImpl({ referrables: [], extensions: extensionsInternal, context }, x)
     }
 
-    function decode(buffer : ArrayBuffer) {
-        return decodeImpl(buffer, { offset: 0 }, [], extensionsInternal)
+    function decode(buffer : ArrayBuffer, context : Context) {
+        return decodeImpl({ offset: 0, referrables: [], extensions: extensionsInternal, context }, buffer)
     }
     
     return { encode, decode }
 }
 
 export function encode(x : unknown) {
-    return encodeImpl(x, [], [])
+    return encodeImpl({ referrables: [], extensions: [], context: undefined }, x)
 }
 
 export function decode(buffer : ArrayBuffer) {
-    return decodeImpl(buffer, { offset: 0 }, [], [])
+    return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer)
 }
 
 
 /***** TYPES *****/
 
-type Cursor = { offset : number }
+interface Encoder<Context> {
+    referrables : Memory
+    extensions  : InternalExtension[]
+    context     : Context
+}
+
+interface Decoder<Context> {
+    offset      : number
+    referrables : Memory
+    extensions  : InternalExtension[]
+    context     : Context
+}
 
 type Memory = unknown[]
 
@@ -127,7 +138,7 @@ class Unreachable extends Error { name = "UnreachableError" as const }
 
 interface InternalExtension {
     name       : string
-    when       : (x : unknown) => boolean
+    when       : (x : unknown, context : unknown) => boolean
     encodeImpl : typeof encodeImpl
     decodeImpl : typeof decodeImpl
 }
@@ -135,11 +146,7 @@ interface InternalExtension {
 
 /***** IMPLEMENTATION *****/
 
-function encodeImpl(
-    x           : unknown,
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) : ArrayBuffer {
+function encodeImpl<C>(self : Encoder<C>, x : unknown) : ArrayBuffer {
     
     /* unique types */
     if (x === null)      return Uint8Array.of(NULL).buffer
@@ -157,77 +164,71 @@ function encodeImpl(
     if (x.constructor === String) return encodeString(x)
     
     /* container types */
-    if (x.constructor === Array)  return maybeEncodeReference(x, referrables, extensions, encodeArray)
-    if (x.constructor === Object) return maybeEncodeReference(x as Record<string, unknown>, referrables, extensions, encodeObject)
-    if (x.constructor === Set)    return maybeEncodeReference(x, referrables, extensions, encodeSet)
-    if (x.constructor === Map)    return maybeEncodeReference(x, referrables, extensions, encodeMap)
+    if (x.constructor === Array)  return maybeEncodeReference(self, x, encodeArray)
+    if (x.constructor === Object) return maybeEncodeReference(self, x as Record<string, unknown>, encodeObject)
+    if (x.constructor === Set)    return maybeEncodeReference(self, x, encodeSet)
+    if (x.constructor === Map)    return maybeEncodeReference(self, x, encodeMap)
     
     /* error types */
-    if (x instanceof Error) return maybeEncodeReference(x, referrables, extensions, encodeError)
+    if (x instanceof Error) return maybeEncodeReference(self, x, encodeError)
     
     /* low-level types */
-    if (x.constructor === ArrayBuffer) return maybeEncodeReference(x, referrables, extensions, encodeArrayBuffer)
-    if (ArrayBuffer.isView(x))         return maybeEncodeReference(x as TypedArray, referrables, extensions, encodeTypedArray)
+    if (x.constructor === ArrayBuffer) return maybeEncodeReference(self, x, encodeArrayBuffer)
+    if (ArrayBuffer.isView(x))         return maybeEncodeReference(self, x as TypedArray, encodeTypedArray)
     
     /* extension types */
-    for (const extension of extensions)
-        if (extension.when(x) === true)
-            return maybeEncodeReference(x, referrables, extensions, extension.encodeImpl)
+    for (const extension of self.extensions)
+        if (extension.when(x, self.context) === true)
+            return maybeEncodeReference(self, x, extension.encodeImpl)
 
     throw new NotSerializable(x)
 }
 
-function decodeImpl(
-    buffer      : ArrayBuffer,
-    cursor      : Cursor,
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) : unknown {
-    const view    = new DataView(buffer, cursor.offset)
+function decodeImpl<C>(self : Decoder<C>, buffer : ArrayBuffer) : unknown {
+    const view    = new DataView(buffer, self.offset)
     
     const typeTag = view.getUint8(0)
-    cursor.offset += 1
+    self.offset += 1
     
     if (typeTag === NULL)        return null
     if (typeTag === UNDEFINED)   return undefined
     if (typeTag === TRUE)        return true
     if (typeTag === FALSE)       return false
-    if (typeTag === REFERENCE)   return decodeReference(buffer, cursor, referrables)
-    if (typeTag === NUMBER)      return decodeNumber(buffer, cursor)
-    if (typeTag === DATE)        return decodeDate(buffer, cursor)
-    if (typeTag === REGEXP)      return decodeRegex(buffer, cursor)
-    if (typeTag === BIGINTP)     return decodeBigInt(buffer, cursor)
-    if (typeTag === BIGINTN)     return -decodeBigInt(buffer, cursor)
-    if (typeTag === STRING)      return decodeString(buffer, cursor)
-    if (typeTag === ARRAY)       return decodeArray(buffer, cursor, referrables, extensions)
-    if (typeTag === OBJECT)      return decodeObject(buffer, cursor, referrables, extensions)
-    if (typeTag === SET)         return decodeSet(buffer, cursor, referrables, extensions)
-    if (typeTag === MAP)         return decodeMap(buffer, cursor, referrables, extensions)
-    if (typeTag & ERROR)         return decodeError(buffer, typeTag, cursor, referrables, extensions)
-    if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(buffer, cursor, referrables)
-    if (typeTag & ARRAYBUFFER)   return decodeTypedArray(buffer, typeTag, cursor, referrables)
+    if (typeTag === REFERENCE)   return decodeReference(self, buffer)
+    if (typeTag === NUMBER)      return decodeNumber(self, buffer)
+    if (typeTag === DATE)        return decodeDate(self, buffer)
+    if (typeTag === REGEXP)      return decodeRegex(self, buffer)
+    if (typeTag === BIGINTP)     return decodeBigInt(self, buffer)
+    if (typeTag === BIGINTN)     return -decodeBigInt(self, buffer)
+    if (typeTag === STRING)      return decodeString(self, buffer)
+    if (typeTag === ARRAY)       return decodeArray(self, buffer)
+    if (typeTag === OBJECT)      return decodeObject(self, buffer)
+    if (typeTag === SET)         return decodeSet(self, buffer)
+    if (typeTag === MAP)         return decodeMap(self, buffer)
+    if (typeTag & ERROR)         return decodeError(self, buffer, typeTag)
+    if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(self, buffer)
+    if (typeTag & ARRAYBUFFER)   return decodeTypedArray(self, buffer, typeTag)
     if (typeTag & EXTENSION) {
-        const name = decodeImpl(buffer, cursor, referrables, extensions) as string
+        const name = decodeImpl(self, buffer) as string
         
-        for (const ext of extensions)
+        for (const ext of self.extensions)
             if (ext.name === name)
-                return ext.decodeImpl(buffer, cursor, referrables, extensions)
+                return ext.decodeImpl(self, buffer)
     }
 
     throw new Unreachable
 }
 
 function maybeEncodeReference<T>(
-    value       : T,
-    referrables : Memory,
-    extensions  : InternalExtension[],
-    encoder     : (x : T, referrables : Memory, extensions : InternalExtension[]) => ArrayBuffer
+    self    : Encoder<unknown>,
+    x       : T,
+    encoder : (self : Encoder<unknown>, x : T) => ArrayBuffer
 ) {
-    const alreadyEncoded = referrables.indexOf(value)
+    const alreadyEncoded = self.referrables.indexOf(x)
     
     if (alreadyEncoded === -1) {
-        referrables.push(value)
-        return encoder(value, referrables, extensions)
+        self.referrables.push(x)
+        return encoder(self, x)
     }
     
     return encodeReference(alreadyEncoded)
@@ -237,9 +238,9 @@ function encodeReference(reference : number) {
     return concatArrayBuffers(Uint8Array.of(REFERENCE), encodeVarint(reference).buffer)
 }
 
-function decodeReference(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) {
-    const reference = decodeVarint(buffer, cursor)
-    return referrables[reference]
+function decodeReference(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    const reference = decodeVarint(self, buffer)
+    return self.referrables[reference]
 }
 
 function encodeNumber(number : number) {
@@ -250,9 +251,9 @@ function encodeNumber(number : number) {
     return buffer
 }
 
-function decodeNumber(buffer : ArrayBuffer, cursor : Cursor) {
-    const view = new DataView(buffer, cursor.offset)
-    cursor.offset += 8
+function decodeNumber(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    const view = new DataView(buffer, self.offset)
+    self.offset += 8
     return view.getFloat64(0)
 }
 
@@ -264,9 +265,9 @@ function encodeDate(date : Date) {
     return buffer
 }
 
-function decodeDate(buffer : ArrayBuffer, cursor : Cursor) {
-    const view = new DataView(buffer, cursor.offset)
-    cursor.offset += 8
+function decodeDate(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    const view = new DataView(buffer, self.offset)
+    self.offset += 8
     return new Date(view.getFloat64(0))
 }
 
@@ -274,11 +275,11 @@ function encodeRegex(regex : RegExp) {
     return concatArrayBuffers(Uint8Array.of(REGEXP).buffer, encodeString(regex.source), encodeString(regex.flags))
 }
 
-function decodeRegex(buffer : ArrayBuffer, cursor : Cursor) {
-    cursor.offset += 1 // the string tag
-    const source = decodeString(buffer, cursor)
-    cursor.offset += 1 // the string tag
-    const flags = decodeString(buffer, cursor)
+function decodeRegex(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    self.offset += 1 // skip reading the string type tag
+    const source = decodeString(self, buffer)
+    self.offset += 1 // skip reading the string type tag
+    const flags = decodeString(self, buffer)
     return new RegExp(source, flags)
 }
 
@@ -315,16 +316,16 @@ function encodeBigInt(bigint : bigint) {
     return buffer
 }
 
-function decodeBigInt(buffer : ArrayBuffer, cursor : Cursor) {
+function decodeBigInt(self : Decoder<unknown>, buffer : ArrayBuffer) {
     const view = new DataView(buffer)
-    const length = view.getUint8(cursor.offset)
-    cursor.offset += 1
+    const length = view.getUint8(self.offset)
+    self.offset += 1
     
     let bigint = 0n
     let shift = 0n
     for (let i = 0; i < length; i++) {
-        bigint |= view.getBigUint64(cursor.offset) << shift
-        cursor.offset += 8
+        bigint |= view.getBigUint64(self.offset) << shift
+        self.offset += 8
         shift += 64n
     }
     
@@ -340,49 +341,36 @@ function encodeString(string : string) {
     )
 }
 
-function decodeString(buffer : ArrayBuffer, cursor : Cursor) {
-    const textBufferLength = decodeVarint(buffer, cursor)
-    const decodedString = new TextDecoder().decode(new Uint8Array(buffer, cursor.offset, textBufferLength))
-    cursor.offset += textBufferLength
+function decodeString(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    const textBufferLength = decodeVarint(self, buffer)
+    const decodedString = new TextDecoder().decode(new Uint8Array(buffer, self.offset, textBufferLength))
+    self.offset += textBufferLength
     return decodedString
 }
 
-function encodeArray(
-    array       : unknown[],
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) {
+function encodeArray(self : Encoder<unknown>, array : unknown[]) {
     if (array.length !== Object.keys(array).length) throw new NotSerializable(array)
     return concatArrayBuffers(
         Uint8Array.of(ARRAY).buffer,
         encodeVarint(array.length).buffer,
-        ...array.map(x => encodeImpl(x, referrables, extensions)!)
+        ...array.map(x => encodeImpl(self, x)!)
     )
 }
 
-function decodeArray(
-    buffer      : ArrayBuffer,
-    cursor      : Cursor,
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) {
+function decodeArray(self: Decoder<unknown>, buffer : ArrayBuffer) {
     
     const result : unknown[] = []
-    referrables.push(result)
+    self.referrables.push(result)
     
-    const arrayLength = decodeVarint(buffer, cursor)
+    const arrayLength = decodeVarint(self, buffer)
     
     for (let i = 0; i < arrayLength; i++)
-        result.push(decodeImpl(buffer, cursor, referrables, extensions))
+        result.push(decodeImpl(self, buffer))
     
     return result
 }
 
-function encodeObject(
-    object      : Record<string, unknown>,
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) : ArrayBuffer {
+function encodeObject(self : Encoder<unknown>, object : Record<string, unknown>) {
     const keys = Object.keys(object)
     return concatArrayBuffers(
         Uint8Array.of(OBJECT).buffer,
@@ -390,92 +378,69 @@ function encodeObject(
         ...keys.map(key =>
             concatArrayBuffers(
                 encodeString(key),
-                encodeImpl(object[key], referrables, extensions)!
+                encodeImpl(self, object[key])!
             )
         )
     )
 }
 
-function decodeObject(
-    buffer      : ArrayBuffer,
-    cursor      : Cursor,
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) {
-    const objectLength = decodeVarint(buffer, cursor)
+function decodeObject(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    const objectLength = decodeVarint(self, buffer)
     const result : Record<string, unknown> = {}
-    referrables.push(result)
+    self.referrables.push(result)
 
     for (let i = 0; i < objectLength; i++) {
         // ignore the tag for the key, go directly to decoding it as a string
-        cursor.offset += 1
-        const key = decodeString(buffer, cursor)
-        result[key] = decodeImpl(buffer, cursor, referrables, extensions)
+        self.offset += 1
+        const key = decodeString(self, buffer)
+        result[key] = decodeImpl(self, buffer)
     }
 
     return result
 }
 
-function encodeSet(
-    set         : Set<unknown>,
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) {
+function encodeSet(self : Encoder<unknown>, set : Set<unknown>) {
     return concatArrayBuffers(
         Uint8Array.of(SET).buffer,
         encodeVarint(set.size).buffer,
-        ...[...set].map(value => encodeImpl(value, referrables, extensions)!)
+        ...[...set].map(value => encodeImpl(self, value)!)
     )
 }
 
-function decodeSet(
-    buffer      : ArrayBuffer,
-    cursor      : Cursor,
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) {
-    const setLength = decodeVarint(buffer, cursor)
+function decodeSet(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    const setLength = decodeVarint(self, buffer)
     const result = new Set
-    referrables.push(result)
+    self.referrables.push(result)
 
     for (let i = 0; i < setLength; i++) {
-        const element = decodeImpl(buffer, cursor, referrables, extensions)
+        const element = decodeImpl(self, buffer)
         result.add(element)
     }
     
     return result
 }
 
-function encodeMap(
-    map : Map<unknown, unknown>,
-    referrables : Memory,
-    extensions : InternalExtension[]
-) {
+function encodeMap(self : Encoder<unknown>, map : Map<unknown, unknown>) {
     return concatArrayBuffers(
         Uint8Array.of(MAP).buffer,
         encodeVarint(map.size).buffer,
         ...[...map].map(([key, value]) =>
             concatArrayBuffers(
-                encodeImpl(key, referrables, extensions)!,
-                encodeImpl(value, referrables, extensions)!
+                encodeImpl(self, key)!,
+                encodeImpl(self, value)!
             )
         )
     )
 }
 
-function decodeMap(
-    buffer      : ArrayBuffer,
-    cursor      : Cursor,
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) {
-    const mapLength = decodeVarint(buffer, cursor)
+function decodeMap(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    const mapLength = decodeVarint(self, buffer)
     const result = new Map
-    referrables.push(result)
+    self.referrables.push(result)
 
     for (let i = 0; i < mapLength; i++) {
-        const key = decodeImpl(buffer, cursor, referrables, extensions)
-        const value = decodeImpl(buffer, cursor, referrables, extensions)
+        const key = decodeImpl(self, buffer)
+        const value = decodeImpl(self, buffer)
         result.set(key, value)
     }
 
@@ -508,34 +473,24 @@ function constructorOfError(tag : number) {
     throw new Unreachable
 }
 
-function encodeError(
-    error       : Error,
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) {
+function encodeError(self : Encoder<unknown>, error : Error) {
     return concatArrayBuffers(
         Uint8Array.of(tagOfError(error)).buffer,
         encodeString(error.message),
         encodeString(error.stack ?? ''),
-        encodeImpl((error as unknown as { cause: unknown } ).cause, referrables, extensions)!
+        encodeImpl(self, (error as unknown as { cause: unknown } ).cause)!
     )
 }
 
-function decodeError(
-    buffer      : ArrayBuffer,
-    typeTag     : number,
-    cursor      : Cursor,
-    referrables : Memory,
-    extensions  : InternalExtension[]
-) {
+function decodeError(self: Decoder<unknown>, buffer : ArrayBuffer, typeTag : number) {
     // ignore the tag for the message, go directly to decoding it as a string
-    cursor.offset += 1
-    const message = decodeString(buffer, cursor)
+    self.offset += 1
+    const message = decodeString(self, buffer)
     
     // ignore the tag for the stack, go directly to decoding it as a string
-    cursor.offset += 1
-    const stack = decodeString(buffer, cursor)
-    const cause = decodeImpl(buffer, cursor, referrables, extensions)
+    self.offset += 1
+    const stack = decodeString(self, buffer)
+    const cause = decodeImpl(self, buffer)
     
     const error : Error =
         cause === undefined
@@ -548,7 +503,7 @@ function decodeError(
     return error
 }
 
-function encodeArrayBuffer(buffer : ArrayBuffer) {
+function encodeArrayBuffer(self : Encoder<unknown>, buffer : ArrayBuffer) {
     return concatArrayBuffers(
         Uint8Array.of(ARRAYBUFFER).buffer,
         encodeVarint(buffer.byteLength).buffer,
@@ -556,11 +511,11 @@ function encodeArrayBuffer(buffer : ArrayBuffer) {
     )
 }
 
-function decodeArrayBuffer(buffer : ArrayBuffer, cursor : Cursor, referrables : Memory) {
-    const bufferLength = decodeVarint(buffer, cursor)
-    const decodedBuffer = buffer.slice(cursor.offset, cursor.offset + bufferLength)
-    cursor.offset += bufferLength
-    referrables.push(decodedBuffer)
+function decodeArrayBuffer(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    const bufferLength = decodeVarint(self, buffer)
+    const decodedBuffer = buffer.slice(self.offset, self.offset + bufferLength)
+    self.offset += bufferLength
+    self.referrables.push(decodedBuffer)
     return decodedBuffer
 }
 
@@ -600,7 +555,7 @@ function constructorOfTypedArray(typeTag : number) {
     throw new Unreachable
 }
 
-function encodeTypedArray(typedArray : TypedArray) {
+function encodeTypedArray(_ : Encoder<unknown>, typedArray : TypedArray) {
     return concatArrayBuffers(
         Uint8Array.of(tagOfTypedArray(typedArray)).buffer,
         encodeVarint(typedArray.buffer.byteLength).buffer,
@@ -610,15 +565,15 @@ function encodeTypedArray(typedArray : TypedArray) {
     )
 }
 
-function decodeTypedArray(buffer : ArrayBuffer, typeTag: number, cursor : Cursor, referrables : Memory) {
-    const bufferLength = decodeVarint(buffer, cursor)
-    const byteOffset   = decodeVarint(buffer, cursor)
-    const viewLength   = decodeVarint(buffer, cursor)
-    const sourceBuffer = buffer.slice(cursor.offset, cursor.offset + bufferLength)
-    cursor.offset     += bufferLength
+function decodeTypedArray(self: Decoder<unknown>, buffer : ArrayBuffer, typeTag: number) {
+    const bufferLength = decodeVarint(self, buffer)
+    const byteOffset   = decodeVarint(self, buffer)
+    const viewLength   = decodeVarint(self, buffer)
+    const sourceBuffer = buffer.slice(self.offset, self.offset + bufferLength)
+    self.offset     += bufferLength
     const TypedArray   = constructorOfTypedArray(typeTag)
     const decodedView  = new TypedArray(sourceBuffer, byteOffset, viewLength)
-    referrables.push(decodedView)
+    self.referrables.push(decodedView)
     return decodedView
 }
 
@@ -647,15 +602,15 @@ function encodeVarint(num: number): Uint8Array {
     return arr
 }
 
-function decodeVarint(buffer : ArrayBuffer, cursor : Cursor): number {
+function decodeVarint(self: Decoder<unknown>, buffer : ArrayBuffer) {
     
-    const byteArray = new Uint8Array(buffer, cursor.offset)
+    const byteArray = new Uint8Array(buffer, self.offset)
 
     let num = 0
     let shift = 0
     for (let i = 0; i < byteArray.length; i++) {
         const varIntPart = byteArray[i]
-        cursor.offset += 1
+        self.offset += 1
         num |= (varIntPart & 0b01111111) << shift
         if ((varIntPart & 0b10000000) === 0) return num
         shift += 7
