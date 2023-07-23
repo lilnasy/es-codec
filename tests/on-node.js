@@ -11,6 +11,7 @@ import sets from "./sets.js"
 import strings from "./strings.js"
 import typedarrays from "./typedarrays.js"
 import extensionUrl from "./extension-url.js"
+import extensionContext from "./extension-context.js"
 
 arrays(test, deepStrictEqual)
 dataview(test, deepStrictEqual)
@@ -23,3 +24,4 @@ sets(test, deepStrictEqual)
 strings(test, deepStrictEqual)
 typedarrays(test, deepStrictEqual)
 extensionUrl(test, deepStrictEqual)
+extensionContext(test, deepStrictEqual)

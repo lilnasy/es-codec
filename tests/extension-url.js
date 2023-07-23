@@ -15,7 +15,7 @@ export default function (runner, assertEquals) {
         assertEquals(url, decode(encode(url)))
     })
 
-    runner("Multiple references to the same URL", () => {
+    runner("Extension - Multiple references to the same URL", () => {
         const url = new URL("https://example.com/xyz/123?abc=456#aaa")
         const ref = { url, url2: url }
 
