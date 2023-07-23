@@ -32,3 +32,5 @@ jobs:
     needs: check
     if: needs.check.outputs.new == 'true'
     uses: ./.github/workflows/release.yml
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
