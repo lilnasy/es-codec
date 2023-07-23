@@ -498,6 +498,7 @@ function decodeError(self: Decoder<unknown>, buffer : ArrayBuffer, typeTag : num
             // @ts-ignore error cause has been supported by every major runtime since 2021
             : new (constructorOfError(typeTag))(message, { cause })
     
+    self.referrables.push(error)
     error.stack = stack
     
     return error

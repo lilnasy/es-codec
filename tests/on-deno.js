@@ -9,6 +9,7 @@ import regexps from "./regexs.js"
 import sets from "./sets.js"
 import strings from "./strings.js"
 import typedarrays from "./typedarrays.js"
+import references from "./references.js"
 import extensionUrl from "./extension-url.js"
 import extensionContext from "./extension-context.js"
 
@@ -22,5 +23,6 @@ regexps(Deno.test, assertEquals)
 sets(Deno.test, assertEquals)
 strings(Deno.test, assertEquals)
 typedarrays(Deno.test, assertEquals)
+references(Deno.test, assertEquals)
 extensionUrl(Deno.test, assertEquals)
 extensionContext(Deno.test, assertEquals)
