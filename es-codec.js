@@ -379,6 +379,7 @@ function decodeError(self, buffer, typeTag) {
         ? new (constructorOfError(typeTag))(message)
         // @ts-ignore error cause has been supported by every major runtime since 2021
         : new (constructorOfError(typeTag))(message, { cause });
+    self.referrables.push(error);
     error.stack = stack;
     return error;
 }

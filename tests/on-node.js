@@ -10,6 +10,7 @@ import regexps from "./regexs.js"
 import sets from "./sets.js"
 import strings from "./strings.js"
 import typedarrays from "./typedarrays.js"
+import references from "./references.js"
 import extensionUrl from "./extension-url.js"
 import extensionContext from "./extension-context.js"
 
@@ -23,5 +24,6 @@ regexps(test, deepStrictEqual)
 sets(test, deepStrictEqual)
 strings(test, deepStrictEqual)
 typedarrays(test, deepStrictEqual)
+references(test, deepStrictEqual)
 extensionUrl(test, deepStrictEqual)
 extensionContext(test, deepStrictEqual)
