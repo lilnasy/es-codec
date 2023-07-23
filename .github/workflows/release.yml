@@ -16,18 +16,16 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v3
       
-      - name: Publish to npm registry
+      - name: Login to NPM
+        run: npm set //registry.npmjs.org/:_authToken ${{secrets.NPM_TOKEN}}
+      
+      - name: Publish to NPM
         run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{secrets.npm_token}}
   
   tag:
     needs: ci
     runs-on: ubuntu-latest
     steps:
-      - name: Clone repository
-        uses: actions/checkout@v3
-      
       - name: Tag a release
         env:
           GITHUB_TOKEN: ${{ github.token }}
