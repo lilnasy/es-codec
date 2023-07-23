@@ -16,13 +16,13 @@ const SET = 0b00001110;
 const MAP = 0b00001111;
 const _RECORD = 0b00010000; // https://github.com/tc39/proposal-record-tuple
 const _TUPLE = 0b00010001;
-const ERROR = 0b0100000;
-const EVAL_ERROR = 0b0100001;
-const RANGE_ERROR = 0b0100010;
-const REFERENCE_ERROR = 0b0100011;
-const SYNTAX_ERROR = 0b0100100;
-const TYPE_ERROR = 0b0100101;
-const URI_ERROR = 0b0100110;
+const ERROR = 0b00100000;
+const EVAL_ERROR = 0b00100001;
+const RANGE_ERROR = 0b00100010;
+const REFERENCE_ERROR = 0b00100011;
+const SYNTAX_ERROR = 0b00100100;
+const TYPE_ERROR = 0b00100101;
+const URI_ERROR = 0b00100110;
 const ARRAYBUFFER = 0b01000000;
 const DATAVIEW = 0b01000001;
 const INT8ARRAY = 0b01000010;
@@ -36,22 +36,53 @@ const FLOAT32ARRAY = 0b01001001;
 const FLOAT64ARRAY = 0b01001010;
 const BIGINT64ARRAY = 0b01001011;
 const BIGUINT64ARRAY = 0b01001100;
+const EXTENSION = 0b10000000;
+/***** PUBLIC API *****/
 export class NotSerializable extends Error {
     value;
+    name = "NotSerializableError";
     constructor(value) {
         super();
         this.value = value;
     }
 }
-class Unreachable extends Error {
+export function createCodec(extensions) {
+    if (extensions.length > 128)
+        throw new Error("es-codec: createCodec: The number of extensions must be less than 128. Found: " + extensions.length);
+    const extensionsInternal = new Array;
+    for (const ext of extensions) {
+        extensionsInternal.push({
+            name: ext.name,
+            when: ext.when,
+            encodeImpl(self, x) {
+                return concatArrayBuffers(Uint8Array.of(EXTENSION).buffer, encodeImpl(self, ext.name), encodeImpl(self, ext.encode(x, self.context)));
+            },
+            decodeImpl(self, buffer) {
+                const result = ext.decode(decodeImpl(self, buffer), self.context);
+                self.referrables.push(result);
+                return result;
+            }
+        });
+    }
+    function encode(x, context) {
+        return encodeImpl({ referrables: [], extensions: extensionsInternal, context }, x);
+    }
+    function decode(buffer, context) {
+        return decodeImpl({ offset: 0, referrables: [], extensions: extensionsInternal, context }, buffer);
+    }
+    return { encode, decode };
 }
 export function encode(x) {
-    return encodeImpl(x);
+    return encodeImpl({ referrables: [], extensions: [], context: undefined }, x);
 }
 export function decode(buffer) {
-    return decodeImpl(buffer, { offset: 0 }, []);
+    return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer);
 }
-function encodeImpl(x, referrables = []) {
+class Unreachable extends Error {
+    name = "UnreachableError";
+}
+/***** IMPLEMENTATION *****/
+function encodeImpl(self, x) {
     /* unique types */
     if (x === null)
         return Uint8Array.of(NULL).buffer;
@@ -75,27 +106,31 @@ function encodeImpl(x, referrables = []) {
         return encodeString(x);
     /* container types */
     if (x.constructor === Array)
-        return maybeEncodeReference(x, referrables, encodeArray);
+        return maybeEncodeReference(self, x, encodeArray);
     if (x.constructor === Object)
-        return maybeEncodeReference(x, referrables, encodeObject);
+        return maybeEncodeReference(self, x, encodeObject);
     if (x.constructor === Set)
-        return maybeEncodeReference(x, referrables, encodeSet);
+        return maybeEncodeReference(self, x, encodeSet);
     if (x.constructor === Map)
-        return maybeEncodeReference(x, referrables, encodeMap);
+        return maybeEncodeReference(self, x, encodeMap);
     /* error types */
     if (x instanceof Error)
-        return maybeEncodeReference(x, referrables, encodeError);
+        return maybeEncodeReference(self, x, encodeError);
     /* low-level types */
     if (x.constructor === ArrayBuffer)
-        return maybeEncodeReference(x, referrables, encodeArrayBuffer);
+        return maybeEncodeReference(self, x, encodeArrayBuffer);
     if (ArrayBuffer.isView(x))
-        return maybeEncodeReference(x, referrables, encodeTypedArray);
+        return maybeEncodeReference(self, x, encodeTypedArray);
+    /* extension types */
+    for (const extension of self.extensions)
+        if (extension.when(x, self.context) === true)
+            return maybeEncodeReference(self, x, extension.encodeImpl);
     throw new NotSerializable(x);
 }
-function decodeImpl(buffer, cursor, referrables) {
-    const view = new DataView(buffer, cursor.offset);
+function decodeImpl(self, buffer) {
+    const view = new DataView(buffer, self.offset);
     const typeTag = view.getUint8(0);
-    cursor.offset += 1;
+    self.offset += 1;
     if (typeTag === NULL)
         return null;
     if (typeTag === UNDEFINED)
@@ -105,62 +140,55 @@ function decodeImpl(buffer, cursor, referrables) {
     if (typeTag === FALSE)
         return false;
     if (typeTag === REFERENCE)
-        return decodeReference(buffer, cursor, referrables);
+        return decodeReference(self, buffer);
     if (typeTag === NUMBER)
-        return decodeNumber(buffer, cursor);
+        return decodeNumber(self, buffer);
     if (typeTag === DATE)
-        return decodeDate(buffer, cursor);
+        return decodeDate(self, buffer);
     if (typeTag === REGEXP)
-        return decodeRegex(buffer, cursor);
+        return decodeRegex(self, buffer);
     if (typeTag === BIGINTP)
-        return decodeBigInt(buffer, cursor);
+        return decodeBigInt(self, buffer);
     if (typeTag === BIGINTN)
-        return -decodeBigInt(buffer, cursor);
+        return -decodeBigInt(self, buffer);
     if (typeTag === STRING)
-        return decodeString(buffer, cursor);
+        return decodeString(self, buffer);
     if (typeTag === ARRAY)
-        return decodeArray(buffer, cursor, referrables);
+        return decodeArray(self, buffer);
     if (typeTag === OBJECT)
-        return decodeObject(buffer, cursor, referrables);
+        return decodeObject(self, buffer);
     if (typeTag === SET)
-        return decodeSet(buffer, cursor, referrables);
+        return decodeSet(self, buffer);
     if (typeTag === MAP)
-        return decodeMap(buffer, cursor, referrables);
+        return decodeMap(self, buffer);
     if (typeTag & ERROR)
-        return decodeError(buffer, typeTag, cursor, referrables);
+        return decodeError(self, buffer, typeTag);
     if (typeTag === ARRAYBUFFER)
-        return decodeArrayBuffer(buffer, cursor, referrables);
+        return decodeArrayBuffer(self, buffer);
     if (typeTag & ARRAYBUFFER)
-        return decodeTypedArray(buffer, typeTag, cursor, referrables);
+        return decodeTypedArray(self, buffer, typeTag);
+    if (typeTag & EXTENSION) {
+        const name = decodeImpl(self, buffer);
+        for (const ext of self.extensions)
+            if (ext.name === name)
+                return ext.decodeImpl(self, buffer);
+    }
     throw new Unreachable;
 }
-function concatArrayBuffers(...buffers) {
-    let cumulativeSize = 0;
-    for (const buffer of buffers)
-        cumulativeSize += buffer.byteLength;
-    const result = new Uint8Array(cumulativeSize);
-    let offset = 0;
-    for (const buffer of buffers) {
-        result.set(new Uint8Array(buffer), offset);
-        offset += buffer.byteLength;
-    }
-    return result.buffer;
-}
-function maybeEncodeReference(value, referrables, encoder) {
-    const alreadyEncoded = referrables.indexOf(value);
+function maybeEncodeReference(self, x, encoder) {
+    const alreadyEncoded = self.referrables.indexOf(x);
     if (alreadyEncoded === -1) {
-        referrables.push(value);
-        return encoder(value, referrables);
+        self.referrables.push(x);
+        return encoder(self, x);
     }
-    else
-        return encodeReference(alreadyEncoded);
+    return encodeReference(alreadyEncoded);
 }
 function encodeReference(reference) {
     return concatArrayBuffers(Uint8Array.of(REFERENCE), encodeVarint(reference).buffer);
 }
-function decodeReference(buffer, cursor, referrables) {
-    const reference = decodeVarint(buffer, cursor);
-    return referrables[reference];
+function decodeReference(self, buffer) {
+    const reference = decodeVarint(self, buffer);
+    return self.referrables[reference];
 }
 function encodeNumber(number) {
     const buffer = new ArrayBuffer(9);
@@ -169,9 +197,9 @@ function encodeNumber(number) {
     view.setFloat64(1, number);
     return buffer;
 }
-function decodeNumber(buffer, cursor) {
-    const view = new DataView(buffer, cursor.offset);
-    cursor.offset += 8;
+function decodeNumber(self, buffer) {
+    const view = new DataView(buffer, self.offset);
+    self.offset += 8;
     return view.getFloat64(0);
 }
 function encodeDate(date) {
@@ -181,19 +209,19 @@ function encodeDate(date) {
     view.setFloat64(1, date.getTime());
     return buffer;
 }
-function decodeDate(buffer, cursor) {
-    const view = new DataView(buffer, cursor.offset);
-    cursor.offset += 8;
+function decodeDate(self, buffer) {
+    const view = new DataView(buffer, self.offset);
+    self.offset += 8;
     return new Date(view.getFloat64(0));
 }
 function encodeRegex(regex) {
     return concatArrayBuffers(Uint8Array.of(REGEXP).buffer, encodeString(regex.source), encodeString(regex.flags));
 }
-function decodeRegex(buffer, cursor) {
-    cursor.offset += 1; // the string tag
-    const source = decodeString(buffer, cursor);
-    cursor.offset += 1; // the string tag
-    const flags = decodeString(buffer, cursor);
+function decodeRegex(self, buffer) {
+    self.offset += 1; // skip reading the string type tag
+    const source = decodeString(self, buffer);
+    self.offset += 1; // skip reading the string type tag
+    const flags = decodeString(self, buffer);
     return new RegExp(source, flags);
 }
 // benchmarks/bigint-encode.ts
@@ -222,15 +250,15 @@ function encodeBigInt(bigint) {
     }
     return buffer;
 }
-function decodeBigInt(buffer, cursor) {
+function decodeBigInt(self, buffer) {
     const view = new DataView(buffer);
-    const length = view.getUint8(cursor.offset);
-    cursor.offset += 1;
+    const length = view.getUint8(self.offset);
+    self.offset += 1;
     let bigint = 0n;
     let shift = 0n;
     for (let i = 0; i < length; i++) {
-        bigint |= view.getBigUint64(cursor.offset) << shift;
-        cursor.offset += 8;
+        bigint |= view.getBigUint64(self.offset) << shift;
+        self.offset += 8;
         shift += 64n;
     }
     return bigint;
@@ -239,64 +267,64 @@ function encodeString(string) {
     const encodedBuffer = new TextEncoder().encode(string).buffer;
     return concatArrayBuffers(Uint8Array.of(STRING).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer);
 }
-function decodeString(buffer, cursor) {
-    const textBufferLength = decodeVarint(buffer, cursor);
-    const decodedString = new TextDecoder().decode(new Uint8Array(buffer, cursor.offset, textBufferLength));
-    cursor.offset += textBufferLength;
+function decodeString(self, buffer) {
+    const textBufferLength = decodeVarint(self, buffer);
+    const decodedString = new TextDecoder().decode(new Uint8Array(buffer, self.offset, textBufferLength));
+    self.offset += textBufferLength;
     return decodedString;
 }
-function encodeArray(array, referrables) {
+function encodeArray(self, array) {
     if (array.length !== Object.keys(array).length)
         throw new NotSerializable(array);
-    return concatArrayBuffers(Uint8Array.of(ARRAY).buffer, encodeVarint(array.length).buffer, ...array.map(x => encodeImpl(x, referrables)));
+    return concatArrayBuffers(Uint8Array.of(ARRAY).buffer, encodeVarint(array.length).buffer, ...array.map(x => encodeImpl(self, x)));
 }
-function decodeArray(buffer, cursor, referrables) {
+function decodeArray(self, buffer) {
     const result = [];
-    referrables.push(result);
-    const arrayLength = decodeVarint(buffer, cursor);
+    self.referrables.push(result);
+    const arrayLength = decodeVarint(self, buffer);
     for (let i = 0; i < arrayLength; i++)
-        result.push(decodeImpl(buffer, cursor, referrables));
+        result.push(decodeImpl(self, buffer));
     return result;
 }
-function encodeObject(object, referrables) {
+function encodeObject(self, object) {
     const keys = Object.keys(object);
-    return concatArrayBuffers(Uint8Array.of(OBJECT).buffer, encodeVarint(keys.length).buffer, ...keys.map(key => concatArrayBuffers(encodeString(key), encodeImpl(object[key], referrables))));
+    return concatArrayBuffers(Uint8Array.of(OBJECT).buffer, encodeVarint(keys.length).buffer, ...keys.map(key => concatArrayBuffers(encodeString(key), encodeImpl(self, object[key]))));
 }
-function decodeObject(buffer, cursor, referrables) {
-    const objectLength = decodeVarint(buffer, cursor);
+function decodeObject(self, buffer) {
+    const objectLength = decodeVarint(self, buffer);
     const result = {};
-    referrables.push(result);
+    self.referrables.push(result);
     for (let i = 0; i < objectLength; i++) {
         // ignore the tag for the key, go directly to decoding it as a string
-        cursor.offset += 1;
-        const key = decodeString(buffer, cursor);
-        result[key] = decodeImpl(buffer, cursor, referrables);
+        self.offset += 1;
+        const key = decodeString(self, buffer);
+        result[key] = decodeImpl(self, buffer);
     }
     return result;
 }
-function encodeSet(set, referrables) {
-    return concatArrayBuffers(Uint8Array.of(SET).buffer, encodeVarint(set.size).buffer, ...[...set].map(value => encodeImpl(value, referrables)));
+function encodeSet(self, set) {
+    return concatArrayBuffers(Uint8Array.of(SET).buffer, encodeVarint(set.size).buffer, ...[...set].map(value => encodeImpl(self, value)));
 }
-function decodeSet(buffer, cursor, referrables) {
-    const setLength = decodeVarint(buffer, cursor);
+function decodeSet(self, buffer) {
+    const setLength = decodeVarint(self, buffer);
     const result = new Set;
-    referrables.push(result);
+    self.referrables.push(result);
     for (let i = 0; i < setLength; i++) {
-        const element = decodeImpl(buffer, cursor, referrables);
+        const element = decodeImpl(self, buffer);
         result.add(element);
     }
     return result;
 }
-function encodeMap(map, referrables) {
-    return concatArrayBuffers(Uint8Array.of(MAP).buffer, encodeVarint(map.size).buffer, ...[...map].map(([key, value]) => concatArrayBuffers(encodeImpl(key, referrables), encodeImpl(value, referrables))));
+function encodeMap(self, map) {
+    return concatArrayBuffers(Uint8Array.of(MAP).buffer, encodeVarint(map.size).buffer, ...[...map].map(([key, value]) => concatArrayBuffers(encodeImpl(self, key), encodeImpl(self, value))));
 }
-function decodeMap(buffer, cursor, referrables) {
-    const mapLength = decodeVarint(buffer, cursor);
+function decodeMap(self, buffer) {
+    const mapLength = decodeVarint(self, buffer);
     const result = new Map;
-    referrables.push(result);
+    self.referrables.push(result);
     for (let i = 0; i < mapLength; i++) {
-        const key = decodeImpl(buffer, cursor, referrables);
-        const value = decodeImpl(buffer, cursor, referrables);
+        const key = decodeImpl(self, buffer);
+        const value = decodeImpl(self, buffer);
         result.set(key, value);
     }
     return result;
@@ -336,17 +364,17 @@ function constructorOfError(tag) {
         return URIError;
     throw new Unreachable;
 }
-function encodeError(error, referrables) {
-    return concatArrayBuffers(Uint8Array.of(tagOfError(error)).buffer, encodeString(error.message), encodeString(error.stack ?? ''), encodeImpl(error.cause, referrables));
+function encodeError(self, error) {
+    return concatArrayBuffers(Uint8Array.of(tagOfError(error)).buffer, encodeString(error.message), encodeString(error.stack ?? ''), encodeImpl(self, error.cause));
 }
-function decodeError(buffer, typeTag, cursor, referrables) {
+function decodeError(self, buffer, typeTag) {
     // ignore the tag for the message, go directly to decoding it as a string
-    cursor.offset += 1;
-    const message = decodeString(buffer, cursor);
+    self.offset += 1;
+    const message = decodeString(self, buffer);
     // ignore the tag for the stack, go directly to decoding it as a string
-    cursor.offset += 1;
-    const stack = decodeString(buffer, cursor);
-    const cause = decodeImpl(buffer, cursor, referrables);
+    self.offset += 1;
+    const stack = decodeString(self, buffer);
+    const cause = decodeImpl(self, buffer);
     const error = cause === undefined
         ? new (constructorOfError(typeTag))(message)
         // @ts-ignore error cause has been supported by every major runtime since 2021
@@ -354,14 +382,14 @@ function decodeError(buffer, typeTag, cursor, referrables) {
     error.stack = stack;
     return error;
 }
-function encodeArrayBuffer(buffer) {
+function encodeArrayBuffer(_, buffer) {
     return concatArrayBuffers(Uint8Array.of(ARRAYBUFFER).buffer, encodeVarint(buffer.byteLength).buffer, buffer);
 }
-function decodeArrayBuffer(buffer, cursor, referrables) {
-    const bufferLength = decodeVarint(buffer, cursor);
-    const decodedBuffer = buffer.slice(cursor.offset, cursor.offset + bufferLength);
-    cursor.offset += bufferLength;
-    referrables.push(decodedBuffer);
+function decodeArrayBuffer(self, buffer) {
+    const bufferLength = decodeVarint(self, buffer);
+    const decodedBuffer = buffer.slice(self.offset, self.offset + bufferLength);
+    self.offset += bufferLength;
+    self.referrables.push(decodedBuffer);
     return decodedBuffer;
 }
 function tagOfTypedArray(typedArray) {
@@ -419,18 +447,18 @@ function constructorOfTypedArray(typeTag) {
         return BigUint64Array;
     throw new Unreachable;
 }
-function encodeTypedArray(typedArray) {
+function encodeTypedArray(_, typedArray) {
     return concatArrayBuffers(Uint8Array.of(tagOfTypedArray(typedArray)).buffer, encodeVarint(typedArray.buffer.byteLength).buffer, encodeVarint(typedArray.byteOffset).buffer, encodeVarint(typedArray instanceof DataView ? typedArray.byteLength : typedArray.length).buffer, typedArray.buffer);
 }
-function decodeTypedArray(buffer, typeTag, cursor, referrables) {
-    const bufferLength = decodeVarint(buffer, cursor);
-    const byteOffset = decodeVarint(buffer, cursor);
-    const viewLength = decodeVarint(buffer, cursor);
-    const sourceBuffer = buffer.slice(cursor.offset, cursor.offset + bufferLength);
-    cursor.offset += bufferLength;
+function decodeTypedArray(self, buffer, typeTag) {
+    const bufferLength = decodeVarint(self, buffer);
+    const byteOffset = decodeVarint(self, buffer);
+    const viewLength = decodeVarint(self, buffer);
+    const sourceBuffer = buffer.slice(self.offset, self.offset + bufferLength);
+    self.offset += bufferLength;
     const TypedArray = constructorOfTypedArray(typeTag);
     const decodedView = new TypedArray(sourceBuffer, byteOffset, viewLength);
-    referrables.push(decodedView);
+    self.referrables.push(decodedView);
     return decodedView;
 }
 function varIntByteCount(num) {
@@ -451,18 +479,30 @@ function encodeVarint(num) {
     }
     return arr;
 }
-function decodeVarint(buffer, cursor) {
-    const byteArray = new Uint8Array(buffer, cursor.offset);
+function decodeVarint(self, buffer) {
+    const byteArray = new Uint8Array(buffer, self.offset);
     let num = 0;
     let shift = 0;
     for (let i = 0; i < byteArray.length; i++) {
         const varIntPart = byteArray[i];
-        cursor.offset += 1;
+        self.offset += 1;
         num |= (varIntPart & 0b01111111) << shift;
         if ((varIntPart & 0b10000000) === 0)
             return num;
         shift += 7;
     }
     throw new Unreachable;
+}
+function concatArrayBuffers(...buffers) {
+    let cumulativeSize = 0;
+    for (const buffer of buffers)
+        cumulativeSize += buffer.byteLength;
+    const result = new Uint8Array(cumulativeSize);
+    let offset = 0;
+    for (const buffer of buffers) {
+        result.set(new Uint8Array(buffer), offset);
+        offset += buffer.byteLength;
+    }
+    return result.buffer;
 }
 //# sourceMappingURL=es-codec.js.map
