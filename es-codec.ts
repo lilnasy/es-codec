@@ -45,6 +45,16 @@ const EXTENSION         = 0b10000000
 
 /***** PUBLIC API *****/
 
+export type Serializable = ExtendedSerializable<never>
+
+export function encode(x : Serializable) {
+    return encodeImpl({ referrables: [], extensions: [], context: undefined }, x)
+}
+
+export function decode(buffer : ArrayBuffer) {
+    return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer) as Serializable
+}
+
 export class NotSerializable extends Error {
     name = "NotSerializableError" as const
     constructor(readonly value : unknown) {
@@ -54,57 +64,86 @@ export class NotSerializable extends Error {
 
 export interface Extension<Extended, ReducedType, Context> {
     name   : string
-    when   : (x      : unknown    , context : Context) => x is Extended
-    encode : (x      : Extended   , context : Context) => ReducedType
-    decode : (buffer : ReducedType, context : Context) => Extended
+    when   : (x : unknown) => x is Extended
+    encode : (extended : Extended   , context : Context) => ReducedType
+    decode : (reduced  : ReducedType, context : Context) => Extended
 }
 
-export function createCodec<Context = unknown>(extensions: Extension<unknown, unknown, unknown>[]) {
-    
-    if (extensions.length > 128) throw new Error("es-codec: createCodec: The number of extensions must be less than 128. Found: " + extensions.length)
-    
-    const extensionsInternal = new Array<InternalExtension>
-
-    for (const ext of extensions) {
-        extensionsInternal.push({
-            name: ext.name,
-            when: ext.when,
-            encodeImpl(self, x) {
-                return concatArrayBuffers(
-                    Uint8Array.of(EXTENSION).buffer,
-                    encodeImpl(self, ext.name),
-                    encodeImpl(self, ext.encode(x, self.context))
-                )
-            },
-            decodeImpl(self, buffer) {
-                const result = ext.decode(decodeImpl(self, buffer), self.context)
-                self.referrables.push(result)
-                return result
-            }
-        })
-    }
-    
-    function encode(x : unknown, context : Context) {
-        return encodeImpl({ referrables: [], extensions: extensionsInternal, context }, x)
-    }
-
-    function decode(buffer : ArrayBuffer, context : Context) {
-        return decodeImpl({ offset: 0, referrables: [], extensions: extensionsInternal, context }, buffer)
-    }
-    
-    return { encode, decode }
+export function defineExtension<Extended, ReducedType, Context>(
+    extension: Extension<Extended, ReducedType, Context>
+) {
+    return extension
 }
 
-export function encode(x : unknown) {
-    return encodeImpl({ referrables: [], extensions: [], context: undefined }, x)
+/**
+ * A helper function that allows you to easily create a custom
+ * codec that uses context. This is only useful for type-checking.
+ * It does not do anything at runtime.
+ */
+export function defineContext<Context = Nothing>() {
+    return {
+        // deno-lint-ignore no-explicit-any
+        createCodec<Extensions extends Extension<any, any, Context>[]>(extensions : Extensions) {
+            return createCodecImpl<Context, Extensions>(extensions)
+        }
+    }
 }
 
-export function decode(buffer : ArrayBuffer) {
-    return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer)
+// deno-lint-ignore no-explicit-any
+export function createCodec<Extensions extends Extension<any, any, undefined>[]>(extensions : Extensions) {
+    return createCodecImpl<Nothing, Extensions>(extensions)
 }
 
 
 /***** TYPES *****/
+
+type BaseSerializablePrimitives =
+    | null
+    | undefined
+    | boolean
+    | number
+    | bigint
+    | string
+
+type BaseSerializableObjects =
+    | Date
+    | RegExp
+
+type BaseSerializableErrors =
+    | Error // Error being serializable does not mean its subclasses are too, but there's no way to communicate that using typescript
+    | EvalError
+    | RangeError
+    | SyntaxError
+    | ReferenceError
+    | TypeError
+    | URIError
+
+type BaseSerializableMemory =
+    | ArrayBuffer
+    | DataView
+    | Int8Array
+    | Uint8Array
+    | Uint8ClampedArray
+    | Int16Array
+    | Uint16Array
+    | Int32Array
+    | Uint32Array
+    | BigInt64Array
+    | BigUint64Array
+
+type BaseSerializable =
+    | BaseSerializablePrimitives
+    | BaseSerializableObjects
+    | BaseSerializableErrors
+    | BaseSerializableMemory
+
+type SerializableContainers<Element> =
+    | Element[]
+    | Set<Element>
+    | symbol extends Element ? Record<string | number | symbol, Element> : Record<string | number, Element>
+    | Map<Element, Element>
+
+type ExtendedSerializable<AdditionalTypes> = BaseSerializable | AdditionalTypes | SerializableContainers<BaseSerializable | AdditionalTypes>
 
 interface Encoder<Context> {
     referrables : Memory
@@ -138,15 +177,70 @@ class Unreachable extends Error { name = "UnreachableError" as const }
 
 interface InternalExtension {
     name       : string
-    when       : (x : unknown, context : unknown) => boolean
+    when       : (x : unknown) => boolean
     encodeImpl : typeof encodeImpl
     decodeImpl : typeof decodeImpl
 }
 
 
-/***** IMPLEMENTATION *****/
+/***** IMPLEMENTATION - EXTENSIONS *****/
 
-function encodeImpl<C>(self : Encoder<C>, x : unknown) : ArrayBuffer {
+/**
+ * This is a unique "type" for internal use by es-codec.
+ * It is used as a default for when the user does not explicitly
+ * provide context for use by extensions. It will be interpreted
+ * as an instruction to hide the context argument from the types
+ * of the encode and decode functions.
+ */
+type Nothing = typeof nothing
+declare const nothing : unique symbol
+
+function createCodecImpl<
+    Context,
+    // deno-lint-ignore no-explicit-any
+    Extensions extends Extension<any, any, never>[]
+>(
+    extensions : Extensions
+) {
+    const extensionsInternal = new Array<InternalExtension>
+
+    for (const ext of extensions) {
+        extensionsInternal.push({
+            name: ext.name,
+            when: ext.when,
+            encodeImpl(self, x) {
+                return concatArrayBuffers(
+                    Uint8Array.of(EXTENSION).buffer,
+                    encodeImpl(self, ext.name),
+                    encodeImpl(self, ext.encode(x, self.context as never))
+                )
+            },
+            decodeImpl(self, buffer) {
+                const result = ext.decode(decodeImpl(self, buffer), self.context as never)
+                self.referrables.push(result)
+                return result
+            }
+        })
+    }
+    
+    function encode(x : ExtendedSerializable<ExtractExtended<Extensions>>, context : Context) {
+        return encodeImpl({ referrables: [], extensions: extensionsInternal, context }, x)
+    }
+    
+    function decode(buffer : ArrayBuffer, context : Context) {
+        return decodeImpl({ offset: 0, referrables: [], extensions: extensionsInternal, context }, buffer) as ExtendedSerializable<ExtractExtended<Extensions>>
+    }
+    
+    return {
+        encode: encode as If<Equals<Context, Nothing>, OneArity<typeof encode>, typeof encode>,
+        decode: decode as If<Equals<Context, Nothing>, OneArity<typeof decode>, typeof decode>
+    }
+}
+
+
+/***** IMPLEMENTATION - CORE *****/
+
+function encodeImpl(self : Encoder<unknown>, x : unknown) : ArrayBuffer {
     
     /* unique types */
     if (x === null)      return Uint8Array.of(NULL).buffer
@@ -178,13 +272,14 @@ function encodeImpl<C>(self : Encoder<C>, x : unknown) : ArrayBuffer {
     
     /* extension types */
     for (const extension of self.extensions)
-        if (extension.when(x, self.context) === true)
+        if (extension.when(x) === true)
             return maybeEncodeReference(self, x, extension.encodeImpl)
-
+    
     throw new NotSerializable(x)
 }
 
-function decodeImpl<C>(self : Decoder<C>, buffer : ArrayBuffer) : unknown {
+function decodeImpl(self : Decoder<unknown>, buffer : ArrayBuffer) : unknown {
+    
     const view    = new DataView(buffer, self.offset)
     
     const typeTag = view.getUint8(0)
@@ -317,6 +412,7 @@ function encodeBigInt(bigint : bigint) {
 }
 
 function decodeBigInt(self : Decoder<unknown>, buffer : ArrayBuffer) {
+    
     const view = new DataView(buffer)
     const length = view.getUint8(self.offset)
     self.offset += 1
@@ -333,7 +429,9 @@ function decodeBigInt(self : Decoder<unknown>, buffer : ArrayBuffer) {
 }
 
 function encodeString(string : string) {
+    
     const encodedBuffer = new TextEncoder().encode(string).buffer
+    
     return concatArrayBuffers(
         Uint8Array.of(STRING).buffer,
         encodeVarint(encodedBuffer.byteLength).buffer,
@@ -349,7 +447,9 @@ function decodeString(self: Decoder<unknown>, buffer : ArrayBuffer) {
 }
 
 function encodeArray(self : Encoder<unknown>, array : unknown[]) {
+    
     if (array.length !== Object.keys(array).length) throw new NotSerializable(array)
+    
     return concatArrayBuffers(
         Uint8Array.of(ARRAY).buffer,
         encodeVarint(array.length).buffer,
@@ -371,7 +471,9 @@ function decodeArray(self: Decoder<unknown>, buffer : ArrayBuffer) {
 }
 
 function encodeObject(self : Encoder<unknown>, object : Record<string, unknown>) {
+    
     const keys = Object.keys(object)
+    
     return concatArrayBuffers(
         Uint8Array.of(OBJECT).buffer,
         encodeVarint(keys.length).buffer,
@@ -385,6 +487,7 @@ function encodeObject(self : Encoder<unknown>, object : Record<string, unknown>)
 }
 
 function decodeObject(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    
     const objectLength = decodeVarint(self, buffer)
     const result : Record<string, unknown> = {}
     self.referrables.push(result)
@@ -408,6 +511,7 @@ function encodeSet(self : Encoder<unknown>, set : Set<unknown>) {
 }
 
 function decodeSet(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    
     const setLength = decodeVarint(self, buffer)
     const result = new Set
     self.referrables.push(result)
@@ -434,6 +538,7 @@ function encodeMap(self : Encoder<unknown>, map : Map<unknown, unknown>) {
 }
 
 function decodeMap(self: Decoder<unknown>, buffer : ArrayBuffer) {
+    
     const mapLength = decodeVarint(self, buffer)
     const result = new Map
     self.referrables.push(result)
@@ -448,6 +553,7 @@ function decodeMap(self: Decoder<unknown>, buffer : ArrayBuffer) {
 }
 
 function tagOfError(error : Error) {
+    
     const constructor = error.constructor
 
     if (constructor === Error)          return ERROR
@@ -462,6 +568,7 @@ function tagOfError(error : Error) {
 }
 
 function constructorOfError(tag : number) {
+    
     if (tag === ERROR)           return Error
     if (tag === EVAL_ERROR)      return EvalError
     if (tag === RANGE_ERROR)     return RangeError
@@ -521,6 +628,7 @@ function decodeArrayBuffer(self: Decoder<unknown>, buffer : ArrayBuffer) {
 }
 
 function tagOfTypedArray(typedArray : TypedArray) {
+    
     const constructor = typedArray.constructor
     
     if (constructor === DataView)          return DATAVIEW
@@ -540,6 +648,7 @@ function tagOfTypedArray(typedArray : TypedArray) {
 }
 
 function constructorOfTypedArray(typeTag : number) {
+    
     if (typeTag === DATAVIEW)          return DataView
     if (typeTag === INT8ARRAY)         return Int8Array
     if (typeTag === UINT8ARRAY)        return Uint8Array
@@ -620,6 +729,9 @@ function decodeVarint(self: Decoder<unknown>, buffer : ArrayBuffer) {
     throw new Unreachable
 }
 
+
+/***** UTILITY FUNCTIONS *****/
+
 function concatArrayBuffers(...buffers : ArrayBuffer[]){
     
     let cumulativeSize = 0
@@ -636,4 +748,20 @@ function concatArrayBuffers(...buffers : ArrayBuffer[]){
     
 	return result.buffer as ArrayBuffer
 }
+
+type If<Condition, Then, Else> = Condition extends true ? Then : Else
+
+type OneArity<Fun> =
+    // deno-lint-ignore no-explicit-any
+    Fun extends (...args : [ infer I, ...any[] ] ) => infer O
+        ? (input : I) => O
+        : 5
+
+type Equals<Left, Right> = Left extends Right ? Right extends Left ? true : false : false
+
+type ExtractExtended<Extensions extends unknown[]> =
+    // deno-lint-ignore no-explicit-any
+    Extensions[number] extends { encode(x : infer Extended, context : any) : any }
+        ? Extended
+        : never
 
