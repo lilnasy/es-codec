@@ -45,12 +45,14 @@ const EXTENSION         = 0b10000000
 
 /***** PUBLIC API *****/
 
-export function encode(x : Serializable<never>) {
+export type Serializable = ExtendedSerializable<never>
+
+export function encode(x : Serializable) {
     return encodeImpl({ referrables: [], extensions: [], context: undefined }, x)
 }
 
 export function decode(buffer : ArrayBuffer) {
-    return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer) as Serializable<never>
+    return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer) as Serializable
 }
 
 export class NotSerializable extends Error {
@@ -141,7 +143,7 @@ type SerializableContainers<Element> =
     | symbol extends Element ? Record<string | number | symbol, Element> : Record<string | number, Element>
     | Map<Element, Element>
 
-type Serializable<Extended> = BaseSerializable | Extended | SerializableContainers<BaseSerializable | Extended>
+type ExtendedSerializable<AdditionalTypes> = BaseSerializable | AdditionalTypes | SerializableContainers<BaseSerializable | AdditionalTypes>
 
 interface Encoder<Context> {
     referrables : Memory
@@ -220,16 +222,14 @@ function createCodecImpl<
             }
         })
     }
-
-    function encode(x : ExtendedSerializable, context : Context) {
+    
+    function encode(x : ExtendedSerializable<ExtractExtended<Extensions>>, context : Context) {
         return encodeImpl({ referrables: [], extensions: extensionsInternal, context }, x)
     }
-
+    
     function decode(buffer : ArrayBuffer, context : Context) {
-        return decodeImpl({ offset: 0, referrables: [], extensions: extensionsInternal, context }, buffer) as ExtendedSerializable
+        return decodeImpl({ offset: 0, referrables: [], extensions: extensionsInternal, context }, buffer) as ExtendedSerializable<ExtractExtended<Extensions>>
     }
-
-    type ExtendedSerializable = Serializable<ExtractExtended<Extensions>>
     
     return {
         encode: encode as If<Equals<Context, Nothing>, OneArity<typeof encode>, typeof encode>,
