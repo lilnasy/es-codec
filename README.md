@@ -94,9 +94,10 @@ interface Extension {
 ```
 - **name**: This will be used as the tag in the serialized representation. When deserializing, the tag is used to identify the extension that should be used for decoding.
 - **when**: This is a function that receives an unsupported object as the argument. It should return true if the extension can encode the provided object.
-- **encode**: This is a function that receives all unsupported objects for which `when` returned true. You can "reduce" your custom type in terms of other types that are supported. For example, you can encode a `Graph` as two arrays: one of `Edge`s, and one of the `Node`s. Another extension can encode an `Edge` as `[ from : number, to: number ]`.
+- **encode**: This is a function that receives all unsupported objects for which `when` returned true. You can "reduce" your custom type in terms of other types that are supported. For example, you can encode a `Graph` as `{ edges: Array<Edge>, nodes: Array<Node> }`. Another extension can encode an `Edge` as `[ from : number, to: number ]`.
 - **decode**: This is a function that receives the "reduced" representation created by the extension's `encode` and reconstructs your custom type from it.
 
+Note that you can only provide implementations for types that es-codec does not support by default; it is not possible to change how the native types are encoded or decoded.
 ### Type-safety
 For better type-safety and convenience, a helper function is provided that can automatically infer the types from your extension.
 ```ts
