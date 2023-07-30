@@ -98,9 +98,7 @@ function createCodecImpl(extensions) {
         return decodeImpl({ offset: 0, referrables: [], extensions: extensionsInternal, context }, buffer);
     }
     return {
-        // @ts-ignore only the second argument is hidden
         encode: encode,
-        // @ts-ignore only the second argument is hidden
         decode: decode
     };
 }
