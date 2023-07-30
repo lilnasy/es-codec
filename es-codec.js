@@ -38,6 +38,12 @@ const BIGINT64ARRAY = 0b01001011;
 const BIGUINT64ARRAY = 0b01001100;
 const EXTENSION = 0b10000000;
 /***** PUBLIC API *****/
+export function encode(x) {
+    return encodeImpl({ referrables: [], extensions: [], context: undefined }, x);
+}
+export function decode(buffer) {
+    return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer);
+}
 export class NotSerializable extends Error {
     value;
     name = "NotSerializableError";
@@ -46,9 +52,30 @@ export class NotSerializable extends Error {
         this.value = value;
     }
 }
+export function defineExtension(extension) {
+    return extension;
+}
+/**
+ * A helper function that allows you to easily create a custom
+ * codec that uses context. This is only useful for type-checking.
+ * It does not do anything at runtime.
+ */
+export function defineContext() {
+    return {
+        // deno-lint-ignore no-explicit-any
+        createCodec(extensions) {
+            return createCodecImpl(extensions);
+        }
+    };
+}
+// deno-lint-ignore no-explicit-any
 export function createCodec(extensions) {
-    if (extensions.length > 128)
-        throw new Error("es-codec: createCodec: The number of extensions must be less than 128. Found: " + extensions.length);
+    return createCodecImpl(extensions);
+}
+class Unreachable extends Error {
+    name = "UnreachableError";
+}
+function createCodecImpl(extensions) {
     const extensionsInternal = new Array;
     for (const ext of extensions) {
         extensionsInternal.push({
@@ -70,18 +97,14 @@ export function createCodec(extensions) {
     function decode(buffer, context) {
         return decodeImpl({ offset: 0, referrables: [], extensions: extensionsInternal, context }, buffer);
     }
-    return { encode, decode };
+    return {
+        // @ts-ignore only the second argument is hidden
+        encode: encode,
+        // @ts-ignore only the second argument is hidden
+        decode: decode
+    };
 }
-export function encode(x) {
-    return encodeImpl({ referrables: [], extensions: [], context: undefined }, x);
-}
-export function decode(buffer) {
-    return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer);
-}
-class Unreachable extends Error {
-    name = "UnreachableError";
-}
-/***** IMPLEMENTATION *****/
+/***** IMPLEMENTATION - CORE *****/
 function encodeImpl(self, x) {
     /* unique types */
     if (x === null)
@@ -123,7 +146,7 @@ function encodeImpl(self, x) {
         return maybeEncodeReference(self, x, encodeTypedArray);
     /* extension types */
     for (const extension of self.extensions)
-        if (extension.when(x, self.context) === true)
+        if (extension.when(x) === true)
             return maybeEncodeReference(self, x, extension.encodeImpl);
     throw new NotSerializable(x);
 }
@@ -494,6 +517,7 @@ function decodeVarint(self, buffer) {
     }
     throw new Unreachable;
 }
+/***** UTILITY FUNCTIONS *****/
 function concatArrayBuffers(...buffers) {
     let cumulativeSize = 0;
     for (const buffer of buffers)
