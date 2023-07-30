@@ -60,13 +60,68 @@ const decodedByteArray = decode(encodedByteArray) as typeof byteArray
 ## API
 ```ts
 // throws NotSerializable if object is not serializable symbols, functions, class instances, etc.
-function encode(x: unknown): ArrayBuffer
+function encode(x: Serializable): ArrayBuffer
 
-function decode(buffer: ArrayBuffer): unknown
+function decode(buffer: ArrayBuffer): Serializable
 
 class NotSerializable extends Error {
     value: unknown
 }
+```
+
+## Advanced: Extensions API
+If you want to serialize objects not natively supported by es-codec, you can create your own codec. Here's an example of how you would add support for [URL](https://developer.mozilla.org/en-US/docs/Web/API/URL).
+```ts
+import { createCodec } from "es-codec"
+
+const { encode, decode } = createCodec([
+    {
+        name: "URL",
+        when  (x)    { return x.constructor === URL },
+        encode(url)  { return url.href },
+        decode(href) { return new URL(href) }
+    }
+])
+```
+The `createCodec` function accepts an array of extensions, where each extension implements the `Extension` interface.
+```ts
+interface Extension {
+    name   : string
+    when   : (x : unknown)      : boolean
+    encode : (x : any)          : Serializable
+    decode : (x : Serializable) : any
+}
+```
+- **name**: This will be used as the tag in the serialized representation. When deserializing, the tag is used to identify the extension that should be used for decoding.
+- **when**: This is a function that receives an unsupported object as the argument. It should return true if the extension can encode the provided object.
+- **encode**: This is a function that receives all unsupported objects for which `when` returned true. You can "reduce" your custom type in terms of other types that are supported. For example, you can encode a `Graph` as two arrays: one of `Edge`s, and one of the `Node`s. Another extension can encode an `Edge` as `[ from : number, to: number ]`.
+- **decode**: This is a function that receives the "reduced" representation created by the extension's `encode` and reconstructs your custom type from it.
+
+### Type-safety
+For better type-safety and convenience, a helper function is provided that can automatically infer the types from your extension.
+```ts
+import { createCodec, defineExtension } from "es-codec"
+
+const urlExtension = defineExtension({
+
+    name: "URL",
+    
+    // `x is URL` is a type predicate, it is required for
+    // defineExtension's type inference
+    when(x): x is URL { return x.constructor === URL },
+    
+    // `url` is inferred as URL
+    encode(url) { return url.href },
+    
+    // `href` is inferred as string
+    // return type is inferred as URL
+    decode(href) { return new URL(href) }
+})
+
+const { encode, decode } = createCodec([ urlExtension ])
+
+// No type error! URL is now a valid argument type for encode.
+const encodedURL: ArrayBuffer = encode(new URL("https://example.com"))
 ```
 
 ## Stability
@@ -74,10 +129,8 @@ The binary format is subject to change until v1. For now, you will have to ensur
 
 ## Limitations
 Generally, es-codec is more strict than `structuredClone`. It does not support serializing the following types:
-- null-prototype objects: `structuredClone` returns a plain object instead of a null-prototype one. This is likely unintended for users.
+- null-prototype objects: `structuredClone` returns a plain object instead of a null-prototype one. Implicit replacement of object prototypes is probably a bad idea.
 - arrays with properties: Supporting this would cause either serialization to become much slower or the binary representation to become much larger.
-- Blob, File, ImageData: These are not universally supported among server runtimes.
-- RegExp objects will not save their index (e.g. the edgecase of `someRegex.exec("string");someRegex.exec("string")`)
 
 
 ## Benchmarks
