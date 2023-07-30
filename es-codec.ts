@@ -59,7 +59,7 @@ export interface Extension<Extended, ReducedType, Context> {
     decode : (buffer : ReducedType, context : Context) => Extended
 }
 
-export function createCodec<Context = unknown>(extensions: Extension<unknown, unknown, unknown>[]) {
+export function createCodec<Context = unknown>(extensions: Extension<unknown, unknown, Context>[]) {
     
     if (extensions.length > 128) throw new Error("es-codec: createCodec: The number of extensions must be less than 128. Found: " + extensions.length)
     
@@ -68,16 +68,18 @@ export function createCodec<Context = unknown>(extensions: Extension<unknown, un
     for (const ext of extensions) {
         extensionsInternal.push({
             name: ext.name,
-            when: ext.when,
+            when(x, context) {
+                return ext.when(x, context as Context)
+            },
             encodeImpl(self, x) {
                 return concatArrayBuffers(
                     Uint8Array.of(EXTENSION).buffer,
                     encodeImpl(self, ext.name),
-                    encodeImpl(self, ext.encode(x, self.context))
+                    encodeImpl(self, ext.encode(x, self.context as Context))
                 )
             },
             decodeImpl(self, buffer) {
-                const result = ext.decode(decodeImpl(self, buffer), self.context)
+                const result = ext.decode(decodeImpl(self, buffer), self.context as Context)
                 self.referrables.push(result)
                 return result
             }
@@ -146,7 +148,7 @@ interface InternalExtension {
 
 /***** IMPLEMENTATION *****/
 
-function encodeImpl<C>(self : Encoder<C>, x : unknown) : ArrayBuffer {
+function encodeImpl(self : Encoder<unknown>, x : unknown) : ArrayBuffer {
     
     /* unique types */
     if (x === null)      return Uint8Array.of(NULL).buffer
@@ -184,7 +186,7 @@ function encodeImpl<C>(self : Encoder<C>, x : unknown) : ArrayBuffer {
     throw new NotSerializable(x)
 }
 
-function decodeImpl<C>(self : Decoder<C>, buffer : ArrayBuffer) : unknown {
+function decodeImpl(self : Decoder<unknown>, buffer : ArrayBuffer) : unknown {
     const view    = new DataView(buffer, self.offset)
     
     const typeTag = view.getUint8(0)
