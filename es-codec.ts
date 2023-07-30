@@ -232,9 +232,7 @@ function createCodecImpl<
     type ExtendedSerializable = Serializable<ExtractExtended<Extensions>>
     
     return {
-        // @ts-ignore only the second argument is hidden
         encode: encode as If<Equals<Context, Nothing>, OneArity<typeof encode>, typeof encode>,
-        // @ts-ignore only the second argument is hidden
         decode: decode as If<Equals<Context, Nothing>, OneArity<typeof decode>, typeof decode>
     }
 }
