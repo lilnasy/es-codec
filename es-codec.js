@@ -37,7 +37,6 @@ const FLOAT64ARRAY = 0b01001010;
 const BIGINT64ARRAY = 0b01001011;
 const BIGUINT64ARRAY = 0b01001100;
 const EXTENSION = 0b10000000;
-/***** PUBLIC API *****/
 export function encode(x) {
     return encodeImpl({ referrables: [], extensions: [], context: undefined }, x);
 }

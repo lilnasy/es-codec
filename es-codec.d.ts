@@ -1,7 +1,8 @@
 /***** TYPE TAGS *****/
 /***** PUBLIC API *****/
-export declare function encode(x: Serializable<never>): ArrayBuffer;
-export declare function decode(buffer: ArrayBuffer): Serializable<never>;
+export type Serializable = ExtendedSerializable<never>;
+export declare function encode(x: Serializable): ArrayBuffer;
+export declare function decode(buffer: ArrayBuffer): Serializable;
 export declare class NotSerializable extends Error {
     readonly value: unknown;
     name: "NotSerializableError";
@@ -21,13 +22,13 @@ export declare function defineExtension<Extended, ReducedType, Context>(extensio
  */
 export declare function defineContext<Context = Nothing>(): {
     createCodec<Extensions extends Extension<any, any, Context>[]>(extensions: Extensions): {
-        encode: If<Equals<Context, typeof nothing>, (input: Serializable<ExtractExtended<Extensions>>) => ArrayBuffer, (x: Serializable<ExtractExtended<Extensions>>, context: Context) => ArrayBuffer>;
-        decode: If<Equals<Context, typeof nothing>, (input: ArrayBuffer) => Serializable<ExtractExtended<Extensions>>, (buffer: ArrayBuffer, context: Context) => Serializable<ExtractExtended<Extensions>>>;
+        encode: If<Equals<Context, typeof nothing>, (input: ExtendedSerializable<ExtractExtended<Extensions>>) => ArrayBuffer, (x: ExtendedSerializable<ExtractExtended<Extensions>>, context: Context) => ArrayBuffer>;
+        decode: If<Equals<Context, typeof nothing>, (input: ArrayBuffer) => ExtendedSerializable<ExtractExtended<Extensions>>, (buffer: ArrayBuffer, context: Context) => ExtendedSerializable<ExtractExtended<Extensions>>>;
     };
 };
 export declare function createCodec<Extensions extends Extension<any, any, undefined>[]>(extensions: Extensions): {
-    encode: (input: Serializable<ExtractExtended<Extensions>>) => ArrayBuffer;
-    decode: (input: ArrayBuffer) => Serializable<ExtractExtended<Extensions>>;
+    encode: (input: ExtendedSerializable<ExtractExtended<Extensions>>) => ArrayBuffer;
+    decode: (input: ArrayBuffer) => ExtendedSerializable<ExtractExtended<Extensions>>;
 };
 /***** TYPES *****/
 type BaseSerializablePrimitives = null | undefined | boolean | number | bigint | string;
@@ -36,7 +37,7 @@ type BaseSerializableErrors = Error | EvalError | RangeError | SyntaxError | Ref
 type BaseSerializableMemory = ArrayBuffer | DataView | Int8Array | Uint8Array | Uint8ClampedArray | Int16Array | Uint16Array | Int32Array | Uint32Array | BigInt64Array | BigUint64Array;
 type BaseSerializable = BaseSerializablePrimitives | BaseSerializableObjects | BaseSerializableErrors | BaseSerializableMemory;
 type SerializableContainers<Element> = Element[] | Set<Element> | symbol extends Element ? Record<string | number | symbol, Element> : Record<string | number, Element> | Map<Element, Element>;
-type Serializable<Extended> = BaseSerializable | Extended | SerializableContainers<BaseSerializable | Extended>;
+type ExtendedSerializable<AdditionalTypes> = BaseSerializable | AdditionalTypes | SerializableContainers<BaseSerializable | AdditionalTypes>;
 /***** IMPLEMENTATION - EXTENSIONS *****/
 /**
  * This is a unique "type" for internal use by es-codec.
