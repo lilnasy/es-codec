@@ -36,8 +36,9 @@ type BaseSerializableObjects = Date | RegExp;
 type BaseSerializableErrors = Error | EvalError | RangeError | SyntaxError | ReferenceError | TypeError | URIError;
 type BaseSerializableMemory = ArrayBuffer | DataView | Int8Array | Uint8Array | Uint8ClampedArray | Int16Array | Uint16Array | Int32Array | Uint32Array | BigInt64Array | BigUint64Array;
 type BaseSerializable = BaseSerializablePrimitives | BaseSerializableObjects | BaseSerializableErrors | BaseSerializableMemory;
-type SerializableContainers<Element> = Element[] | Set<Element> | symbol extends Element ? Record<string | number | symbol, Element> : Record<string | number, Element> | Map<Element, Element>;
-type ExtendedSerializable<AdditionalTypes> = BaseSerializable | AdditionalTypes | SerializableContainers<BaseSerializable | AdditionalTypes>;
+type ExtendedSerializable<AdditionalTypes> = BaseSerializable | AdditionalTypes | (BaseSerializable | AdditionalTypes)[] | Set<BaseSerializable | AdditionalTypes> | Map<BaseSerializable | AdditionalTypes, BaseSerializable | AdditionalTypes> | {
+    [_ in (string | number | symbol extends AdditionalTypes ? symbol : never)]: BaseSerializable | AdditionalTypes;
+};
 /***** IMPLEMENTATION - EXTENSIONS *****/
 /**
  * This is a unique "type" for internal use by es-codec.
