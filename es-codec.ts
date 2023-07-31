@@ -137,13 +137,13 @@ type BaseSerializable =
     | BaseSerializableErrors
     | BaseSerializableMemory
 
-type SerializableContainers<Element> =
-    | Element[]
-    | Set<Element>
-    | symbol extends Element ? Record<string | number | symbol, Element> : Record<string | number, Element>
-    | Map<Element, Element>
-
-type ExtendedSerializable<AdditionalTypes> = BaseSerializable | AdditionalTypes | SerializableContainers<BaseSerializable | AdditionalTypes>
+type ExtendedSerializable<AdditionalTypes> =
+    | BaseSerializable
+    | AdditionalTypes
+    | (BaseSerializable | AdditionalTypes)[]
+    | Set<BaseSerializable | AdditionalTypes>
+    | Map<BaseSerializable | AdditionalTypes, BaseSerializable | AdditionalTypes>
+    | { [_ in (string | number | symbol extends AdditionalTypes ? symbol : never)]: BaseSerializable | AdditionalTypes }
 
 interface Encoder<Context> {
     referrables : Memory
