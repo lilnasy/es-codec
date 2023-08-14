@@ -44,12 +44,12 @@ const date        = new Date()
 const encodedDate = encode(date) satisfies ArrayBuffer
 const decodedDate = decode(encodedDate) as typeof date
 
-const regexp        = /([A-Z])+/gm
-const encodedRegExp = encode(date) satisfies ArrayBuffer
-const decodedRegExp = decode(encodedDate) as typeof regexp
+const regExp        = /([A-Z])+/gm
+const encodedRegExp = encode(regExp) satisfies ArrayBuffer
+const decodedRegExp = decode(encodedRegExp) as typeof regExp
 
 const error        = new Error('foo')
-const encodedError = encode(Error) satisfies ArrayBuffer
+const encodedError = encode(error) satisfies ArrayBuffer
 const decodedError = decode(encodedError) as typeof error
 
 const byteArray        = new Uint8Array([1, 2, 3])
@@ -132,7 +132,7 @@ The binary format is subject to change until v1. For now, you will have to ensur
 Generally, es-codec is more strict than `structuredClone`. It does not support serializing the following types:
 - null-prototype objects: `structuredClone` returns a plain object instead of a null-prototype one. Implicit replacement of object prototypes is probably a bad idea.
 - arrays with properties: Supporting this would cause either serialization to become much slower or the binary representation to become much larger.
-
+- `new Boolean()`, `new Number()`, and `new String()`: The distinction is not made between primitives and their object counterparts created using the `new` keyword. The objects are serialized as if they were primitives.
 
 ## Benchmarks
 TODO: include a benchmark comparing es-codec to JSON, devalue, msgpack, and protobuf for the objects supported by all formats.
