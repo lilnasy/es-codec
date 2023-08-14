@@ -36,7 +36,7 @@ const map        = new Map([['foo', 'bar']])
 const encodedMap = encode(map) satisfies ArrayBuffer
 const decodedMap = decode(encodedMap) as typeof map
 
-const set        = new Set(1, true, null, "foo")
+const set        = new Set([1, true, null, "foo"])
 const encodedSet = encode(set) satisfies ArrayBuffer 
 const decodedSet = decode(encodedSet) as typeof set
 
