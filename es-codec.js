@@ -1,3 +1,178 @@
+/***** PUBLIC API *****/
+/**
+ * @description Serializes a value into an ArrayBuffer.
+ * @example
+ * For example:
+ * ```ts
+ * const arrayBuffer = encode([ 4n, new Set, { x: Infinity } ])
+ * console.log(arrayBuffer instanceof ArrayBuffer) // true
+ * ```
+ * @throws `NotSerializableError` if the value or one of its contained values is not supported.
+ * @throws `BigIntTooLargeError` if a bigint is larger than 2kB.
+ * @throws `MalformedArrayError` if an array has properties (`[].x = "whatever"`) or contains empty items (`Array(1)`).
+ */
+export function encode(x) {
+    return encodeImpl({ referrables: [], extensions: [], context: undefined }, x);
+}
+/*
+ * @description Deserializes an ArrayBuffer created using `encode` into the original value.
+ * @example
+ * ```ts
+ * const arrayBuffer = encode([ 4n, new Set, { x: Infinity } ])
+ * const originalValue = decode(arrayBuffer)
+ * console.log(originalValue instanceof Array) // true
+ * console.log(originalValue[0] instanceof BigInt) // true
+ * console.log(originalValue[1].size === 0) // true
+ * console.log(originalValue[2].x === Infinity) // true
+ * ```
+ * @throws `IncompatibleCodecError` if the value was encoded using an extension.
+ */
+export function decode(buffer) {
+    return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer);
+}
+/**
+ * @description Thrown by `encode` if a value or one if its contained value is not supported and support was not added via an extension.
+ */
+export class NotSerializableError extends Error {
+    value;
+    name = "NotSerializableError";
+    constructor(value) {
+        super();
+        this.value = value;
+    }
+}
+/**
+ * @description Thrown by `encode` if a bigint is larger than 2kB.
+ */
+export class BigIntTooLargeError extends Error {
+    bigint;
+    name = "BigIntTooLargeError";
+    constructor(bigint) {
+        super();
+        this.bigint = bigint;
+    }
+}
+/**
+ * @description Thrown by `encode` if custom properties have been set on an array or it contains empty items.
+ * @example Here's one instance where this might happen:
+ * ```ts
+ * const arrayWithProperties = []
+ * arrayWithProperties.x = "whatever"
+ * encode(arrayWithProperties) // throws `MalformedArrayError`
+ *
+ * const arrayWithEmptyItems = Array(2)
+ * arrayWithEmptyItems[0] = "value"
+ * // only one of the two spaces in the array is occupied
+ * encode(arrayWithEmptyItems) // throws `MalformedArrayError`
+ * ```
+ */
+export class MalformedArrayError extends Error {
+    array;
+    name = "MalformedArrayError";
+    constructor(array) {
+        super();
+        this.array = array;
+    }
+}
+/**
+ * @description Thrown by `decode` if one of the values was encoded using an extension not available to the current codec.
+ */
+export class IncompatibleCodec extends Error {
+    extensionName;
+    name = "IncompatibleCodecError";
+    constructor(extensionName) {
+        super();
+        this.extensionName = extensionName;
+    }
+}
+/**
+ * @description A helper function that allows you to easily create an extension and let TypeScript infer the types.
+ * @note This is only useful for type-checking; it returns the provided object as-is.
+ * @example Here's how you would add suport for URLs:
+ * ```ts
+ * const urlExtension = defineExtension({
+ *     name: "URL",
+ *     // `x is URL` is a type predicate, necessary for type inference
+ *     when  : (x): x is URL => x instanceof URL,
+ *     encode: url => url.href,
+ *     decode: href => new URL(href)
+ * })
+ */
+export function defineExtension(extension) {
+    return extension;
+}
+/**
+ * @description A helper function that allows you to easily create a custom codec that uses context.
+ * @note This is only useful for type-checking; it does not do anything at runtime.
+ * @example Here's how you would use and provide a context that can log values:
+ * ```ts
+ * interface Logger {
+ *     log(...args : any[]): void
+ * }
+ *
+ * const { encode, decode } = defineContext<Logger>().createCodec([
+ *     defineExtension({
+ *         name: "URL",
+ *         when: (x): x is URL => x instanceof URL,
+ *         encode(url, context) {
+ *             context.log("encoding url", url)
+ *             return url.href
+ *         },
+ *         decode(href, context) {
+ *             context.log("decoding url", href)
+ *             return new URL(href)
+ *         }
+ *     })
+ * ])
+ *
+ * const encodedUrl = encode(new URL("https://example.com"), console)
+ * const decodedUrl = decode(encodedURL, console)
+ * ```
+ */
+export function defineContext() {
+    return {
+        /**
+         * @description Allows you to extend supported types.
+         * @param extensions An array of objects, each implementing the `Extension` interface.
+         * @example Here's how you would add support for URLs:
+         * ```ts
+         * const { encode, decode } = defineContext<ContextType>().createCodec([
+         *     {
+         *         name  : "URL",
+         *         when  : (x): x is URL => x instanceof URL,
+         *         encode: (url, context) => url.href,
+         *         decode: (href, context) => new URL(href)
+         *     }
+         * ])
+         * const arrayBuffer = encode({ url: new URL(window.location) }, contextImplementation)
+         * ```
+         */
+        // deno-lint-ignore no-explicit-any
+        createCodec(extensions) {
+            return createCodecImpl(extensions);
+        }
+    };
+}
+/**
+ * @description Allows you to extend supported types.
+ * @param extensions An array of objects, each implementing the Extension interface.
+ * @example Here's how you would add support for URLs:
+ * ```ts
+ * const { encode, decode } = createCodec([
+ *     {
+ *         name  : "URL",
+ *         when  : (x): x is URL => x instanceof URL,
+ *         encode: url => url.href,
+ *         decode: href => new URL(href)
+ *     }
+ * ])
+ * const arrayBuffer = encode({ url: new URL(window.location) })
+ * ```
+ */
+// deno-lint-ignore no-explicit-any
+export function createCodec(extensions) {
+    return createCodecImpl(extensions);
+}
 /***** TYPE TAGS *****/
 const NULL = 0b00000001;
 const UNDEFINED = 0b00000010;
@@ -37,40 +212,6 @@ const FLOAT64ARRAY = 0b01001010;
 const BIGINT64ARRAY = 0b01001011;
 const BIGUINT64ARRAY = 0b01001100;
 const EXTENSION = 0b10000000;
-export function encode(x) {
-    return encodeImpl({ referrables: [], extensions: [], context: undefined }, x);
-}
-export function decode(buffer) {
-    return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer);
-}
-export class NotSerializable extends Error {
-    value;
-    name = "NotSerializableError";
-    constructor(value) {
-        super();
-        this.value = value;
-    }
-}
-export function defineExtension(extension) {
-    return extension;
-}
-/**
- * A helper function that allows you to easily create a custom
- * codec that uses context. This is only useful for type-checking.
- * It does not do anything at runtime.
- */
-export function defineContext() {
-    return {
-        // deno-lint-ignore no-explicit-any
-        createCodec(extensions) {
-            return createCodecImpl(extensions);
-        }
-    };
-}
-// deno-lint-ignore no-explicit-any
-export function createCodec(extensions) {
-    return createCodecImpl(extensions);
-}
 class Unreachable extends Error {
     name = "UnreachableError";
 }
@@ -97,7 +238,32 @@ function createCodecImpl(extensions) {
         return decodeImpl({ offset: 0, referrables: [], extensions: extensionsInternal, context }, buffer);
     }
     return {
+        /**
+         * @description Serializes a value into an ArrayBuffer.
+         * @example
+         * For example:
+         * ```ts
+         * const arrayBuffer = encode([ 4n, new Set, { x: Infinity } ], context)
+         * console.log(arrayBuffer instanceof ArrayBuffer) // true
+         * ```
+         * @throws `NotSerializableError` if the value or one of its contained values is not supported.
+         * @throws `BigIntTooLargeError` if a bigint is larger than 2kB.
+         * @throws `MalformedArrayError` if an array has properties (`[].x = "whatever"`) or contains empty items (`Array(1)`).
+         */
         encode: encode,
+        /**
+         * @description Deserializes an ArrayBuffer created using `encode` into the original value.
+         * @example
+         * ```ts
+         * const arrayBuffer = encode([ 4n, new Set, { x: Infinity } ])
+         * const originalValue = decode(arrayBuffer, context)
+         * console.log(originalValue instanceof Array) // true
+         * console.log(originalValue[0] instanceof BigInt) // true
+         * console.log(originalValue[1].size === 0) // true
+         * console.log(originalValue[2].x === Infinity) // true
+         * ```
+         * @throws `IncompatibleCodecError` if the value was encoded using an extension.
+         */
         decode: decode
     };
 }
@@ -145,7 +311,7 @@ function encodeImpl(self, x) {
     for (const extension of self.extensions)
         if (extension.when(x) === true)
             return maybeEncodeReference(self, x, extension.encodeImpl);
-    throw new NotSerializable(x);
+    throw new NotSerializableError(x);
 }
 function decodeImpl(self, buffer) {
     const view = new DataView(buffer, self.offset);
@@ -192,6 +358,7 @@ function decodeImpl(self, buffer) {
         for (const ext of self.extensions)
             if (ext.name === name)
                 return ext.decodeImpl(self, buffer);
+        throw new IncompatibleCodec(name);
     }
     throw new Unreachable;
 }
@@ -254,7 +421,7 @@ function encodeBigInt(bigint) {
         b >>= 64n;
     }
     if (uint64Count > 255)
-        throw new NotSerializable(bigint);
+        throw new BigIntTooLargeError(bigint);
     const buffer = new ArrayBuffer(2 + 8 * uint64Count);
     const view = new DataView(buffer);
     view.setUint8(0, negative ? BIGINTN : BIGINTP);
@@ -294,8 +461,9 @@ function decodeString(self, buffer) {
     return decodedString;
 }
 function encodeArray(self, array) {
+    // corner case: Object.assign(Array(1), { x: "whatever" })
     if (array.length !== Object.keys(array).length)
-        throw new NotSerializable(array);
+        throw new MalformedArrayError(array);
     return concatArrayBuffers(Uint8Array.of(ARRAY).buffer, encodeVarint(array.length).buffer, ...array.map(x => encodeImpl(self, x)));
 }
 function decodeArray(self, buffer) {
@@ -365,7 +533,7 @@ function tagOfError(error) {
         return TYPE_ERROR;
     if (constructor === URIError)
         return URI_ERROR;
-    throw new NotSerializable(error);
+    throw new NotSerializableError(error);
 }
 function constructorOfError(tag) {
     if (tag === ERROR)
@@ -439,7 +607,7 @@ function tagOfTypedArray(typedArray) {
         return BIGINT64ARRAY;
     if (constructor === BigUint64Array)
         return BIGUINT64ARRAY;
-    throw new NotSerializable(typedArray);
+    throw new NotSerializableError(typedArray);
 }
 function constructorOfTypedArray(typeTag) {
     if (typeTag === DATAVIEW)
