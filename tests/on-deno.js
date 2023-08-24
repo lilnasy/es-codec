@@ -4,6 +4,7 @@ import dataview from "./dataview.js"
 import date from "./dates.js"
 import errors from "./errors.js"
 import maps from "./maps.js"
+import numbers from "./numbers.js"
 import objects from "./objects.js"
 import regexps from "./regexs.js"
 import sets from "./sets.js"
@@ -18,6 +19,7 @@ dataview(Deno.test, assertEquals)
 date(Deno.test, assertEquals)
 errors(Deno.test, assertEquals)
 maps(Deno.test, assertEquals)
+numbers(Deno.test, assertEquals)
 objects(Deno.test, assertEquals)
 regexps(Deno.test, assertEquals)
 sets(Deno.test, assertEquals)
