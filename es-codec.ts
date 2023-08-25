@@ -119,7 +119,9 @@ export interface Extension<Extended, ReducedType, Context> {
 
 /**
  * A helper function that allows you to easily create an extension and let TypeScript infer the types.
+ * 
  * This is only useful for type-checking; it returns the provided object as-is.
+ * 
  * Here's how you would add suport for URLs
  * ```ts
  * const urlExtension = defineExtension({

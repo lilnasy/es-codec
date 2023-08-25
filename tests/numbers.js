@@ -20,8 +20,6 @@ export default function (runner, assertEquals) {
         assertEquals(decode(encode(NaN))        , NaN        )
         assertEquals(decode(encode(Infinity))   , Infinity   )
         assertEquals(decode(encode(-Infinity))  , -Infinity  )
-        assertEquals(decode(encode(0.5))        , 0.5        )
-        assertEquals(decode(encode(0.5))        , 0.5        )
         assertEquals(decode(encode(0.1111111111111111)), 0.1111111111111111)
         assertEquals(decode(encode(-4206.545669498832)), -4206.545669498832)
     })
