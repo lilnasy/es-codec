@@ -1,29 +1,34 @@
 /***** PUBLIC API *****/
 
 /**
- * @description A union of all the types that es-codec can encode out of the box.
+ * A union of all the types that es-codec can encode out of the box.
  */
 export type Serializable = ExtendedSerializable<never>
 
 /**
- * @description Serializes a value into an ArrayBuffer.
- * @example
- * For example:
+ * Serializes a value into an ArrayBuffer.
+ * 
+ * Basic Usage:
  * ```ts
  * const arrayBuffer = encode([ 4n, new Set, { x: Infinity } ])
  * console.log(arrayBuffer instanceof ArrayBuffer) // true
  * ```
- * @throws `NotSerializableError` if the value or one of its contained values is not supported.
- * @throws `BigIntTooLargeError` if a bigint is larger than 2kB.
- * @throws `MalformedArrayError` if an array has properties (`[].x = "whatever"`) or contains empty items (`Array(1)`).
+ * Throws `NotSerializableError` if the value or one of its contained values is not supported.
+ * 
+ * Throws `BigIntTooLargeError` if a bigint is larger than 2kB.
+ * 
+ * Throws `MalformedArrayError` if an array
+ * - has properties (`[].x = "whatever"`), or
+ * - contains empty items (`Array(1)`).
  */
 export function encode(x : Serializable) {
     return encodeImpl({ referrables: [], extensions: [], context: undefined }, x)
 }
 
-/*
- * @description Deserializes an ArrayBuffer created using `encode` into the original value.
- * @example
+/**
+ * Deserializes an ArrayBuffer created using `encode` into the original value.
+ * 
+ * Basic Usage:
  * ```ts
  * const arrayBuffer = encode([ 4n, new Set, { x: Infinity } ])
  * const originalValue = decode(arrayBuffer)
@@ -32,14 +37,14 @@ export function encode(x : Serializable) {
  * console.log(originalValue[1].size === 0) // true
  * console.log(originalValue[2].x === Infinity) // true
  * ```
- * @throws `IncompatibleCodecError` if the value was encoded using an extension.
+ * Throws `IncompatibleCodecError` if the value was encoded using an extension.
  */
 export function decode(buffer : ArrayBuffer) {
     return decodeImpl({ offset: 0, referrables: [], extensions: [], context: undefined }, buffer) as Serializable
 }
 
 /**
- * @description Thrown by `encode` if a value or one if its contained value is not supported and support was not added via an extension.
+ * Thrown by `encode` if a value or one if its contained value is not supported and support was not added via an extension.
  */
 export class NotSerializableError extends Error {
     name = "NotSerializableError" as const
@@ -49,7 +54,7 @@ export class NotSerializableError extends Error {
 }
 
 /**
- * @description Thrown by `encode` if a bigint is larger than 2kB.
+ * Thrown by `encode` if a bigint is larger than 2kB.
  */
 export class BigIntTooLargeError extends Error {
     name = "BigIntTooLargeError" as const
@@ -59,8 +64,9 @@ export class BigIntTooLargeError extends Error {
 }
 
 /**
- * @description Thrown by `encode` if custom properties have been set on an array or it contains empty items.
- * @example Here's one instance where this might happen:
+ * Thrown by `encode` if custom properties have been set on an array or it contains empty items.
+ * 
+ * Here are the two instances where this might happen:
  * ```ts
  * const arrayWithProperties = []
  * arrayWithProperties.x = "whatever"
@@ -80,7 +86,7 @@ export class MalformedArrayError extends Error {
 }
 
 /**
- * @description Thrown by `decode` if one of the values was encoded using an extension not available to the current codec.
+ * Thrown by `decode` if one of the values was encoded using an extension not available to the current codec.
  */
 export class IncompatibleCodec extends Error {
     name = "IncompatibleCodecError" as const
@@ -112,17 +118,18 @@ export interface Extension<Extended, ReducedType, Context> {
 }
 
 /**
- * @description A helper function that allows you to easily create an extension and let TypeScript infer the types.
- * @note This is only useful for type-checking; it returns the provided object as-is.
- * @example Here's how you would add suport for URLs:
+ * A helper function that allows you to easily create an extension and let TypeScript infer the types.
+ * This is only useful for type-checking; it returns the provided object as-is.
+ * Here's how you would add suport for URLs
  * ```ts
  * const urlExtension = defineExtension({
- *     name: "URL",
+ * name: "URL",
  *     // `x is URL` is a type predicate, necessary for type inference
  *     when  : (x): x is URL => x instanceof URL,
  *     encode: url => url.href,
  *     decode: href => new URL(href)
  * })
+ * ```
  */
 export function defineExtension<Extended, ReducedType, Context>(
     extension: Extension<Extended, ReducedType, Context>
@@ -131,9 +138,11 @@ export function defineExtension<Extended, ReducedType, Context>(
 }
 
 /**
- * @description A helper function that allows you to easily create a custom codec that uses context.
- * @note This is only useful for type-checking; it does not do anything at runtime.
- * @example Here's how you would use and provide a context that can log values:
+ * A helper function that allows you to easily create a custom codec that uses context.
+ * 
+ * This is only useful for type-checking; it does not do anything at runtime.
+ * 
+ * Here's how you would use it to type a context that can log values:
  * ```ts
  * interface Logger {
  *     log(...args : any[]): void
@@ -161,9 +170,9 @@ export function defineExtension<Extended, ReducedType, Context>(
 export function defineContext<Context = NoContext>() {
     return {
         /**
-         * @description Allows you to extend supported types.
-         * @param extensions An array of objects, each implementing the `Extension` interface.
-         * @example Here's how you would add support for URLs: 
+         * Create a custom codec that adds support for more types than what es-codec offers out of the box.
+         * 
+         * Here's how you would add support for URLs: 
          * ```ts
          * const { encode, decode } = defineContext<ContextType>().createCodec([
          *     {
@@ -184,9 +193,9 @@ export function defineContext<Context = NoContext>() {
 }
 
 /**
- * @description Allows you to extend supported types.
- * @param extensions An array of objects, each implementing the Extension interface.
- * @example Here's how you would add support for URLs:
+ * Create a custom codec that adds support for more types than what es-codec offers out of the box.
+ * 
+ * Here's how you would add support for URLs:
  * ```ts
  * const { encode, decode } = createCodec([
  *     {
@@ -390,30 +399,35 @@ function createCodecImpl<
     
     return {
         /**
-         * @description Serializes a value into an ArrayBuffer.
-         * @example
-         * For example:
+         * Serializes a value into an ArrayBuffer.
+         * 
+         * Basic Usage:
          * ```ts
-         * const arrayBuffer = encode([ 4n, new Set, { x: Infinity } ], context)
+         * const arrayBuffer = encode([ 4n, new Set, { x: Infinity } ])
          * console.log(arrayBuffer instanceof ArrayBuffer) // true
          * ```
-         * @throws `NotSerializableError` if the value or one of its contained values is not supported.
-         * @throws `BigIntTooLargeError` if a bigint is larger than 2kB.
-         * @throws `MalformedArrayError` if an array has properties (`[].x = "whatever"`) or contains empty items (`Array(1)`).
+         * Throws `NotSerializableError` if the value or one of its contained values is not supported.
+         * 
+         * Throws `BigIntTooLargeError` if a bigint is larger than 2kB.
+         * 
+         * Throws `MalformedArrayError` if an array
+         * - has properties (`[].x = "whatever"`), or
+         * - contains empty items (`Array(1)`).
          */
         encode: encode as If<Equals<Context, NoContext>, OneArity<typeof encode>, typeof encode>,
         /**
-         * @description Deserializes an ArrayBuffer created using `encode` into the original value.
-         * @example
+         * Deserializes an ArrayBuffer created using `encode` into the original value.
+         * 
+         * Basic Usage:
          * ```ts
          * const arrayBuffer = encode([ 4n, new Set, { x: Infinity } ])
-         * const originalValue = decode(arrayBuffer, context)
+         * const originalValue = decode(arrayBuffer)
          * console.log(originalValue instanceof Array) // true
          * console.log(originalValue[0] instanceof BigInt) // true
          * console.log(originalValue[1].size === 0) // true
          * console.log(originalValue[2].x === Infinity) // true
          * ```
-         * @throws `IncompatibleCodecError` if the value was encoded using an extension.
+         * Throws `IncompatibleCodecError` if the value was encoded using an extension.
          */
         decode: decode as If<Equals<Context, NoContext>, OneArity<typeof decode>, typeof decode>
     }
