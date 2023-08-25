@@ -93,7 +93,9 @@ export class IncompatibleCodec extends Error {
 }
 /**
  * A helper function that allows you to easily create an extension and let TypeScript infer the types.
+ *
  * This is only useful for type-checking; it returns the provided object as-is.
+ *
  * Here's how you would add suport for URLs
  * ```ts
  * const urlExtension = defineExtension({
@@ -183,31 +185,34 @@ export function createCodec(extensions) {
     return createCodecImpl(extensions);
 }
 /***** TYPE TAGS *****/
-const NULL = 0b00000001;
-const UNDEFINED = 0b00000010;
-const TRUE = 0b00000011;
-const FALSE = 0b00000100;
-const REFERENCE = 0b00000101;
-const NUMBER = 0b00000110;
-const DATE = 0b00000111;
-const REGEXP = 0b00001000;
-const STRING = 0b00001001;
-const BIGINTN = 0b00001010;
-const BIGINTP = 0b00001011;
-const ARRAY = 0b00001100;
-const OBJECT = 0b00001101;
-const SET = 0b00001110;
-const MAP = 0b00001111;
-const _RECORD = 0b00010000; // https://github.com/tc39/proposal-record-tuple
-const _TUPLE = 0b00010001;
-const ERROR = 0b00100000;
+const NULL = 0b00000001; // 1
+const UNDEFINED = 0b00000010; // 2
+const TRUE = 0b00000011; // 3
+const FALSE = 0b00000100; // 4
+const REFERENCE = 0b00000111; // 7
+const SMALLINTP = 0b00001000; // 8
+const FLOAT64 = 0b00001001; // 9
+const DATE = 0b00001010; // 10
+const _DECIMAL128 = 0b00001001; // 11 https://github.com/tc39/proposal-decimal
+const _BIGDECIMAL = 0b00001110; // 14
+const BIGINTN = 0b00001111; // 15
+const BIGINTP = 0b00010000; // 16
+const STRING = 0b00010001; // 17
+const REGEXP = 0b00010010; // 18
+const _RECORD = 0b00010101; // 21 https://github.com/tc39/proposal-record-tuple
+const _TUPLE = 0b00010110; // 22
+const ARRAY = 0b00011001; // 25
+const OBJECT = 0b00011010; // 26
+const SET = 0b00011011; // 27
+const MAP = 0b00011100; // 28
+const ERROR = 0b00100000; // 32
 const EVAL_ERROR = 0b00100001;
 const RANGE_ERROR = 0b00100010;
 const REFERENCE_ERROR = 0b00100011;
 const SYNTAX_ERROR = 0b00100100;
 const TYPE_ERROR = 0b00100101;
 const URI_ERROR = 0b00100110;
-const ARRAYBUFFER = 0b01000000;
+const ARRAYBUFFER = 0b01000000; // 64
 const DATAVIEW = 0b01000001;
 const INT8ARRAY = 0b01000010;
 const UINT8ARRAY = 0b01000011;
@@ -220,7 +225,7 @@ const FLOAT32ARRAY = 0b01001001;
 const FLOAT64ARRAY = 0b01001010;
 const BIGINT64ARRAY = 0b01001011;
 const BIGUINT64ARRAY = 0b01001100;
-const EXTENSION = 0b10000000;
+const EXTENSION = 0b10000000; // 128
 class Unreachable extends Error {
     name = "UnreachableError";
 }
@@ -341,8 +346,10 @@ function decodeImpl(self, buffer) {
         return false;
     if (typeTag === REFERENCE)
         return decodeReference(self, buffer);
-    if (typeTag === NUMBER)
-        return decodeNumber(self, buffer);
+    if (typeTag === SMALLINTP)
+        return decodeVarint(self, buffer);
+    if (typeTag === FLOAT64)
+        return decodeFloat(self, buffer);
     if (typeTag === DATE)
         return decodeDate(self, buffer);
     if (typeTag === REGEXP)
@@ -385,20 +392,23 @@ function maybeEncodeReference(self, x, encoder) {
     return encodeReference(alreadyEncoded);
 }
 function encodeReference(reference) {
-    return concatArrayBuffers(Uint8Array.of(REFERENCE), encodeVarint(reference).buffer);
+    return concatArrayBuffers(Uint8Array.of(REFERENCE), encodeVarint(reference));
 }
 function decodeReference(self, buffer) {
     const reference = decodeVarint(self, buffer);
     return self.referrables[reference];
 }
+const MAX_INT_32 = 2 ** 31 - 1;
 function encodeNumber(number) {
+    if (Number.isInteger(number) && 0 <= number && number <= MAX_INT_32)
+        return concatArrayBuffers(Uint8Array.of(SMALLINTP).buffer, encodeVarint(number));
     const buffer = new ArrayBuffer(9);
     const view = new DataView(buffer);
-    view.setUint8(0, NUMBER);
+    view.setUint8(0, FLOAT64);
     view.setFloat64(1, number);
     return buffer;
 }
-function decodeNumber(self, buffer) {
+function decodeFloat(self, buffer) {
     const view = new DataView(buffer, self.offset);
     self.offset += 8;
     return view.getFloat64(0);
@@ -466,7 +476,7 @@ function decodeBigInt(self, buffer) {
 }
 function encodeString(string) {
     const encodedBuffer = new TextEncoder().encode(string).buffer;
-    return concatArrayBuffers(Uint8Array.of(STRING).buffer, encodeVarint(encodedBuffer.byteLength).buffer, encodedBuffer);
+    return concatArrayBuffers(Uint8Array.of(STRING).buffer, encodeVarint(encodedBuffer.byteLength), encodedBuffer);
 }
 function decodeString(self, buffer) {
     const textBufferLength = decodeVarint(self, buffer);
@@ -478,7 +488,7 @@ function encodeArray(self, array) {
     // corner case: Object.assign(Array(1), { x: "whatever" })
     if (array.length !== Object.keys(array).length)
         throw new MalformedArrayError(array);
-    return concatArrayBuffers(Uint8Array.of(ARRAY).buffer, encodeVarint(array.length).buffer, ...array.map(x => encodeImpl(self, x)));
+    return concatArrayBuffers(Uint8Array.of(ARRAY).buffer, encodeVarint(array.length), ...array.map(x => encodeImpl(self, x)));
 }
 function decodeArray(self, buffer) {
     const result = [];
@@ -490,7 +500,7 @@ function decodeArray(self, buffer) {
 }
 function encodeObject(self, object) {
     const keys = Object.keys(object);
-    return concatArrayBuffers(Uint8Array.of(OBJECT).buffer, encodeVarint(keys.length).buffer, ...keys.map(key => concatArrayBuffers(encodeString(key), encodeImpl(self, object[key]))));
+    return concatArrayBuffers(Uint8Array.of(OBJECT).buffer, encodeVarint(keys.length), ...keys.map(key => concatArrayBuffers(encodeString(key), encodeImpl(self, object[key]))));
 }
 function decodeObject(self, buffer) {
     const objectLength = decodeVarint(self, buffer);
@@ -505,7 +515,7 @@ function decodeObject(self, buffer) {
     return result;
 }
 function encodeSet(self, set) {
-    return concatArrayBuffers(Uint8Array.of(SET).buffer, encodeVarint(set.size).buffer, ...[...set].map(value => encodeImpl(self, value)));
+    return concatArrayBuffers(Uint8Array.of(SET).buffer, encodeVarint(set.size), ...[...set].map(value => encodeImpl(self, value)));
 }
 function decodeSet(self, buffer) {
     const setLength = decodeVarint(self, buffer);
@@ -518,7 +528,7 @@ function decodeSet(self, buffer) {
     return result;
 }
 function encodeMap(self, map) {
-    return concatArrayBuffers(Uint8Array.of(MAP).buffer, encodeVarint(map.size).buffer, ...[...map].map(([key, value]) => concatArrayBuffers(encodeImpl(self, key), encodeImpl(self, value))));
+    return concatArrayBuffers(Uint8Array.of(MAP).buffer, encodeVarint(map.size), ...[...map].map(([key, value]) => concatArrayBuffers(encodeImpl(self, key), encodeImpl(self, value))));
 }
 function decodeMap(self, buffer) {
     const mapLength = decodeVarint(self, buffer);
@@ -586,7 +596,7 @@ function decodeError(self, buffer, typeTag) {
     return error;
 }
 function encodeArrayBuffer(_, buffer) {
-    return concatArrayBuffers(Uint8Array.of(ARRAYBUFFER).buffer, encodeVarint(buffer.byteLength).buffer, buffer);
+    return concatArrayBuffers(Uint8Array.of(ARRAYBUFFER).buffer, encodeVarint(buffer.byteLength), buffer);
 }
 function decodeArrayBuffer(self, buffer) {
     const bufferLength = decodeVarint(self, buffer);
@@ -651,7 +661,7 @@ function constructorOfTypedArray(typeTag) {
     throw new Unreachable;
 }
 function encodeTypedArray(_, typedArray) {
-    return concatArrayBuffers(Uint8Array.of(tagOfTypedArray(typedArray)).buffer, encodeVarint(typedArray.buffer.byteLength).buffer, encodeVarint(typedArray.byteOffset).buffer, encodeVarint(typedArray instanceof DataView ? typedArray.byteLength : typedArray.length).buffer, typedArray.buffer);
+    return concatArrayBuffers(Uint8Array.of(tagOfTypedArray(typedArray)).buffer, encodeVarint(typedArray.buffer.byteLength), encodeVarint(typedArray.byteOffset), encodeVarint(typedArray instanceof DataView ? typedArray.byteLength : typedArray.length), typedArray.buffer);
 }
 function decodeTypedArray(self, buffer, typeTag) {
     const bufferLength = decodeVarint(self, buffer);
@@ -680,7 +690,7 @@ function encodeVarint(num) {
         arr[i] = (num & 0b01111111) | (i === (byteCount - 1) ? 0 : 0b10000000);
         num >>>= 7;
     }
-    return arr;
+    return arr.buffer;
 }
 function decodeVarint(self, buffer) {
     const byteArray = new Uint8Array(buffer, self.offset);
