@@ -77,21 +77,13 @@ import { createCodec } from "es-codec"
 const { encode, decode } = createCodec([
     {
         name: "URL",
-        when  (x)    { return x.constructor === URL },
-        encode(url)  { return url.href },
-        decode(href) { return new URL(href) }
+        when: x => x.constructor === URL,
+        encode: url => url.href,
+        decode: href => new URL(href)
     }
 ])
 ```
-The `createCodec` function accepts an array of extensions, where each extension implements the `Extension` interface.
-```ts
-interface Extension {
-    name   : string
-    when   : (x : unknown)      : boolean
-    encode : (x : any)          : Serializable
-    decode : (x : Serializable) : any
-}
-```
+The `createCodec` function accepts an array of extensions, where each extension is an object with the following properties:
 - **name**: This will be used as the tag in the serialized representation. When deserializing, the tag is used to identify the extension that should be used for decoding.
 - **when**: This is a function that receives an unsupported object as the argument. It should return true if the extension can encode the provided object.
 - **encode**: This is a function that receives all unsupported objects for which `when` returned true. You can "reduce" your custom type in terms of other types that are supported. For example, you can encode a `Graph` as `{ edges: Array<Edge>, nodes: Array<Node> }`. Another extension can encode an `Edge` as `[ from : number, to: number ]`.
@@ -109,14 +101,14 @@ const urlExtension = defineExtension({
     
     // `x is URL` is a type predicate, it is required for
     // defineExtension's type inference
-    when(x): x is URL { return x.constructor === URL },
+    when: (x): x is URL => x.constructor === URL,
     
     // `url` is inferred as URL
-    encode(url) { return url.href },
+    encode: url => url.href,
     
     // `href` is inferred as string
     // return type is inferred as URL
-    decode(href) { return new URL(href) }
+    decode: href => new URL(href)
 })
 
 const { encode, decode } = createCodec([ urlExtension ])
@@ -132,7 +124,7 @@ The binary format is subject to change until v1. For now, you will have to ensur
 Generally, es-codec is more strict than `structuredClone`. It does not support serializing the following types:
 - null-prototype objects: `structuredClone` returns a plain object instead of a null-prototype one. Implicit replacement of object prototypes is probably a bad idea.
 - arrays with properties: Supporting this would cause either serialization to become much slower or the binary representation to become much larger.
-- `new Boolean()`, `new Number()`, and `new String()`: The distinction is not made between primitives and their object counterparts created using the `new` keyword. The objects are serialized as if they were primitives.
+- `new Boolean()`, `new Number()`, and `new String()`: The distinction is not made between primitives and their object counterparts created using the `new` keyword. These objects are serialized as if they were primitives.
 
 ## Benchmarks
 TODO: include a benchmark comparing es-codec to JSON, devalue, msgpack, and protobuf for the objects supported by all formats.
