@@ -17,6 +17,12 @@ export default function (runner, assertEquals) {
         assertEquals(decode(encode(error)), error)
     })
 
+    runner("Error - cause self", () => {
+        const error = new Error("test")
+        error.cause = error
+        assertEquals(decode(encode(error)), error)
+    })
+
     runner("Error - subclasses", () => {
 
         const typeError = new TypeError("test")
