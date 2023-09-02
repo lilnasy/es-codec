@@ -90,16 +90,22 @@ export class MalformedArrayError extends Error {
  */
 export class IncompatibleCodec extends Error {
     name = "IncompatibleCodecError" as const
-    constructor(readonly extensionName : string) {
+    constructor(readonly tag: string | number | boolean) {
         super()
     }
 }
 
 export interface Extension<Extended, ReducedType, Context> {
     /**
-     * This will be used as the tag in the serialized representation. When deserializing, the tag is used to identify the extension that should be used for decoding.
+     * A recognisable name for your extension. In the absence of a `tag` property, `name` will be used as the tag.
      */
     name : string
+
+    /**
+     * This will be used to identify an object in the serialized representation.
+     * When deserializing, the tag is used to identify the extension that should be used for decoding.
+     */
+    tag ?: string | number | boolean    
     
     /**
      * This is a function that receives an unsupported object as the argument. It should return true if the extension can encode the provided object.
@@ -125,7 +131,7 @@ export interface Extension<Extended, ReducedType, Context> {
  * Here's how you would add suport for URLs
  * ```ts
  * const urlExtension = defineExtension({
- * name: "URL",
+ *     name: "URL",
  *     // `x is URL` is a type predicate, necessary for type inference
  *     when  : (x): x is URL => x instanceof URL,
  *     encode: url => url.href,
@@ -351,7 +357,7 @@ class Unreachable extends Error {
 }
 
 interface InternalExtension {
-    name       : string
+    tag        : string | number | boolean
     when       : (x : unknown) => boolean
     encodeImpl : typeof encodeImpl
     decodeImpl : typeof decodeImpl
@@ -381,7 +387,7 @@ function createCodecImpl<
 
     for (const ext of extensions) {
         extensionsInternal.push({
-            name: ext.name,
+            tag: ext.tag ?? ext.name,
             when: ext.when,
             encodeImpl(self, x) {
                 return concatArrayBuffers(
@@ -510,13 +516,13 @@ function decodeImpl(self : Decoder, buffer : ArrayBuffer) : unknown {
     if (typeTag === ARRAYBUFFER) return decodeArrayBuffer(self, buffer)
     if (typeTag & ARRAYBUFFER)   return decodeTypedArray(self, buffer, typeTag)
     if (typeTag & EXTENSION) {
-        const name = decodeImpl(self, buffer) as string
+        const tag = decodeImpl(self, buffer) as InternalExtension['tag']
         
         for (const ext of self.extensions)
-            if (ext.name === name)
+            if (ext.tag === tag)
                 return ext.decodeImpl(self, buffer)
         
-        throw new IncompatibleCodec(name)
+        throw new IncompatibleCodec(tag)
     }
 
     throw new Unreachable
